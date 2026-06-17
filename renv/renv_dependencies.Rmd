@@ -1,0 +1,294 @@
+---
+title: "0_installPackages_loadLibraries"
+author: "Pedro Beschoren da Costa"
+date: "August 24, 2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+# 0_installPackages_loadLibraries
+
+This scrip manages package installation and library loading.
+
+We are using package renv (whch substitutes packrat) to manage the packages in our project. Essentially, we ahve a snapshot of our packages and theri versions on the file "renv.lock". this snapshot is taken with renv::snapshot() and re-loaded with renv::restore(). finally, all packages are locally installed in ".\renv\library\R-4.0\x86_64-w64-mingw32"
+
+We can continue to work as normal, installing whatever packages when necessary. if they don't break the rest of the code, we can update the renv snapshot. if they do break the code, we can load the previous lockfile and restore the packages versions adn isntallations
+
+as wallways, amke sure the changes are smooth in your local machine before commitng to the repository. even in case of tatal failiure, we can still restore previous versions due to git version control
+
+
+## 0.1 install Packages
+Packages used in the MeJA Piot experiment have been installed locally by Pedro. new packages will be isntalled during analysis. the chunk below let's you initialize renv, take snapshots, and restore previous package installations. we don't ahve to run this often so it is silenced. OBS: silencing is not a good way to manage the script behaviour.
+
+```{r results=hide}
+
+
+
+# install and load renv
+
+# initialize renv on your R project 
+# renv::init() # you only need to do this once. 
+
+# save the state of the project library to the lockfile (called renv.lock)
+# renv::snapshot() # we don't need to perform this every time
+
+# evert to the previous state as encoded in the lockfile
+# renv::restore() # we don't need to perform this every time
+
+# in package downloading is problematic, try this:
+# Sys.setenv(RENV_DOWNLOAD_FILE_METHOD = "libcurl")
+
+```
+
+## 0.1 load libraries
+here we load all the libraries necessary over the entire analysis, sourcing it from an R script file. this list will have to be updated as we progress in our analysis.
+```{r results=hide}
+
+source("./src/Amplicon_sequencing/Functions/0_load_libraries.r")
+
+
+
+```
+
+## 0.2 packages in lockfile but not detected by renv:status
+renv will find several packages if they are coded as library("package") or require("package") or package::function().These are screened  over all files in your working directory as an automated dependency discovery. Thus some automation of renv::status() and renv::restore() might fail, specially if a package is suggested or is in developmental stage.
+
+The simple presence of this chunk, that does not need to run, allows renv to keep them in the lockfile even if they are not automatically detected at first
+```{r}
+#main packages
+library("devtools")# needed to install some packages
+library("BiocManager") # needed to install some packages
+library("remotes")# needed to install some packages
+library("ggplot2")
+library("dplyr")
+library("tibble") 
+library("rbiom") #needed to load large 16S biom files
+library("stringr")# to wrangle string vectors
+library("Boruta") # for random forest feature selection
+library("mlbench") # for random forest
+library("caret") # for random forest
+library("randomForest") # for random forest
+library("tidyr")
+library("vegan") # for several essential statistical tests
+library("forcats")
+library("ggrepel") # to avoid legends overlapping in your plot
+library("ggpubr")
+library("igraph") # calculates entowrk metrics and manipulates netowrk objects
+library("metagMisc") #  lets you create lists of split phyloseq objects
+library("pheatmap") # heatmaps for deseq2
+library("agricolae")# includes some anova post-hoc options
+library("minpack.lm") #lets you do som HSD tests output is a nice table
+library("Hmisc") # for neutral models
+library("spaa") # need to install Ecoutils
+library("stats4")# for neutral models
+library("car") #for levene test
+library("metacoder") # plots heat trees
+library("purrr") # has map() to select table elements
+library("viridis") # prety colors
+library("phyloseq") # essential to produce phyloseq objects with OUT metadata and taxa in a single place
+library("microbiome") # has convinient data wrangling functions
+library("decontam") # to make use of no-template blank DNA extractions
+library("metagenomeSeq") # to normalize library sizes without rarefying them
+library("DESeq2") # used for differential abundance analysis
+library("WGCNA") # needed for eigen_correlation ()  allowing you to correlate metadata to network modules
+library("pairwiseAdonis")
+library("tyRa")  #need for neutral models
+library("metagMisc")  #n lets you split a phyloseq object in a list
+library("EcolUtils")   #pairwise adonis fucntion
+library("MicEco")  #for venn diagrams on phylosseq  objects
+library("SpiecEasi") # builds the sparse networks
+
+#secondary packages
+library("ANCOMBC")
+library("AlgDesign")
+library("BH")
+library("BiocNeighbors")
+library("BiocParallel")
+library("BiocSingular")
+library("Boruta")
+library("DESeq2")
+library("DelayedArray")
+library("DelayedMatrixStats")
+library("EcolUtils")
+library("GA")
+library("GenSA")
+library("GenomicRanges")
+library("MatrixGenerics")
+library("MicEco")
+library("ModelMetrics")
+library("NADA")
+library("PERFect")
+library("R.cache")
+library("R.methodsS3")
+library("R.oo")
+library("R.utils")
+library("RcppArmadillo")
+library("RcppHNSW")
+library("RcppNumerical")
+library("RcppParallel")
+library("Rdpack")
+library("Rtsne")
+library("SQUAREM")
+library("ScaledMatrix")
+library("SingleCellExperiment")
+library("SpiecEasi")
+library("SummarizedExperiment")
+library("VGAM")
+library("WikidataQueryServiceR")
+library("WikidataR")
+library("WikipediR")
+library("XML")
+library("agricolae")
+library("annotate")
+library("apeglm")
+library("assertthat")
+library("bbmle")
+library("bdsmatrix")
+library("beachmat")
+library("bluster")
+library("bold")
+library("brew")
+library("bslib")
+library("caret")
+library("class")
+library("classInt")
+library("coda")
+library("combinat")
+library("commonmark")
+library("conditionz")
+library("conquer")
+library("credentials")
+library("crosstalk")
+library("crul")
+library("decontam")
+library("devtools")
+library("doSNOW")
+library("dqrng")
+library("e1071")
+library("edgeR")
+library("emdbook")
+library("eulerr")
+library("fastmatch")
+library("fitdistrplus")
+library("fontawesome")
+library("formatR")
+library("fs")
+library("futile.logger")
+library("futile.options")
+library("future")
+library("future.apply")
+library("genefilter")
+library("geneplotter")
+library("gert")
+library("ggfittext")
+library("gh")
+library("gitcreds")
+library("globals")
+library("gower")
+library("hardhat")
+library("httpcode")
+library("httpuv")
+library("huge")
+library("indicspecies")
+library("ini")
+library("installr")
+library("ipred")
+library("irlba")
+library("klaR")
+library("labelled")
+library("lambda.r")
+library("later")
+library("lava")
+library("lazyeval")
+library("listenv")
+library("lubridate")
+library("markdown")
+library("metacoder")
+library("metapod")
+library("microbiome")
+library("miniUI")
+library("mlbench")
+library("mnormt")
+library("mvtnorm")
+library("natserv")
+library("pROC")
+library("packrat")
+library("pacman")
+library("pairwiseAdonis")
+library("parallelly")
+library("pbapply")
+library("phangorn")
+library("pheatmap")
+library("pkgbuild")
+library("polyclip")
+library("polylabelr")
+library("prodlim")
+library("progressr")
+library("promises")
+library("proxy")
+library("psych")
+library("pulsar")
+library("quadprog")
+library("questionr")
+library("randomForest")
+library("ranger")
+library("rappdirs")
+library("ratelimitr")
+library("rbibutils")
+library("rbiom")
+library("rcmdcheck")
+library("recipes")
+library("remotes")
+library("rentrez")
+library("rex")
+library("ritis")
+library("rjson")
+library("rncl")
+library("rotl")
+library("roxygen2")
+library("rredlist")
+library("rsvd")
+library("rversions")
+library("sass")
+library("scran")
+library("scuttle")
+library("segmented")
+library("seqinr")
+library("sessioninfo")
+library("shades")
+library("shiny")
+library("sitmo")
+library("slam")
+library("sn")
+library("snow")
+library("softImpute")
+library("solrium")
+library("sourcetools")
+library("spaa")
+library("sparseMatrixStats")
+library("spatial")
+library("statmod")
+library("styler")
+library("taxize")
+library("textshape")
+library("timeDate")
+library("tmvnsim")
+library("triebeard")
+library("truncnorm")
+library("urltools")
+library("usethis")
+library("uuid")
+library("whisker")
+library("wikitaxa")
+library("worrms")
+library("xml2")
+library("xopen")
+library("xtable")
+library("zCompositions")
+library("zinbwave")
+library("zoo")
+
+
+```
+
+### Done! all libraries loaded.

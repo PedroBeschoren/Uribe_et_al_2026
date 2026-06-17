@@ -1,0 +1,9 @@
+sandbox/
+cellar/
+library/
+local/
+lock/
+python/
+staging/
+settings.dcf
+settings.json

@@ -1,0 +1,210 @@
+---
+title: "Plant_biomass"
+author: "Melissa"
+date: "4-7-2022"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+## 5.01 load libraries, improve memory use
+
+```{r results="hide"}
+# this will load all key libraries for the whole project
+source("./renv/0_load_libraries.R")
+
+# increases memory limit used by R
+memory.limit(size = 350000)
+
+#Load the metadata
+metadata <- read.csv("./Data/mapping_file_generation/Plant_phenotype_metadata.csv")
+
+```
+
+```{r}
+set.seed(123)
+#Check if the biomass data is normally distributed
+#Everything
+shapiro.test(metadata$Shoot_.DryWeight)
+#result: p-value =2.2e-16
+kruskal.test(Shoot_.DryWeight ~ Stress, data = metadata)
+#p value 2.25e-05
+
+#Per plant species
+##subset by plant species
+per_sp_list <- split.data.frame(metadata, metadata$Sp_speed)
+#S12 has only NA values so i remove it from the list (otherwise the tests fail)
+per_sp_list_noS12 <- within(per_sp_list, rm("S12"))
+
+#Shapiro
+shapiro_per_sp <- lapply(per_sp_list_noS12, function(x)
+  shapiro.test(x[["Shoot_.DryWeight"]]))
+#All plants are normally distributed
+
+#Levene to test for homogeneity
+levene_per_sp <- lapply(per_sp_list_noS12, function(x)
+  leveneTest(x$Shoot_.DryWeight ~ x$Stress, data = x))
+#F10 and F8 do not have homogeneity of variances
+
+#Kruskall and dunn but only use results for F10 and F8
+Kruskal_per_sp <- lapply(per_sp_list_noS12, function(x)
+  kruskal.test(x$Shoot_.DryWeight ~ x$Stress))
+
+#Check pairwise differences using dunn.test
+library("dunn.test")
+dunntest <- lapply(per_sp_list_noS12, function (x)
+  dunn.test(x$Shoot_.DryWeight, x$Stress))
+
+
+dunntest.df <- as.data.frame(dunntest)
+
+dunntest2 <- lapply(per_sp_list_noS12, function (x)
+  dunn.test(x$Shoot_.DryWeight, x$Stress, method = "bh"))
+
+
+dunntest2.df <- as.data.frame(dunntest2)
+
+#Now with Anova and tukey
+aov_per_sp <- lapply(per_sp_list_noS12, function(x)
+  aov(x$Shoot_.DryWeight ~ x$Stress, data = x))
+summaryaov_per_sp <- lapply(aov_per_sp, function(x)
+  summary.aov(x))
+
+tukey_per_sp <- lapply(aov_per_sp, function(x)
+  TukeyHSD(x))
+
+#Save all objects
+save(per_sp_list_noS12,  
+     file = "./15_Plant_Biomass/Objects/per_sp_list_noS12.RData")
+save(shapiro_per_sp,  
+     file = "./15_Plant_Biomass/Objects/shapiro_per_sp.RData")
+save(levene_per_sp,  
+     file = "./15_Plant_Biomass/Objects/levene_per_sp.RData")
+save(Kruskal_per_sp,  
+     file = "./15_Plant_Biomass/Objects/Kruskal_per_sp.RData")
+save(dunntest2,  
+     file = "./15_Plant_Biomass/Objects/dunntest2.RData")
+save(aov_per_sp,  
+     file = "./15_Plant_Biomass/Objects/aov_per_sp.RData")
+save(summaryaov_per_sp,  
+     file = "./15_Plant_Biomass/Objects/summaryaov_per_sp.RData")
+save(tukey_per_sp,  
+     file = "./15_Plant_Biomass/Objects/tukey_per_sp.RData")
+
+
+```
+
+#For follow up load whichever result you want to work with
+```{r}
+#Load rresults
+load("./15_Plant_Biomass/Objects/per_sp_list_noS12.RData")
+load("./15_Plant_Biomass/Objects/shapiro_per_sp.RData")
+load("./15_Plant_Biomass/Objects/levene_per_sp.RData")
+load("./15_Plant_Biomass/Objects/Kruskal_per_sp.RData")
+load("./15_Plant_Biomass/Objects/dunntest2.RData")
+load("./15_Plant_Biomass/Objects/aov_per_sp.RData")
+load("./15_Plant_Biomass/Objects/summaryaov_per_sp.RData")
+load("./15_Plant_Biomass/Objects/tukey_per_sp.RData")
+```
+
+#Make a df for tukey results
+```{r}
+tukey_per_sp_MeJAControl <- lapply(tukey_per_sp, function(x){
+  map(x, 10)
+})
+MeJAControl <- unlist(tukey_per_sp_MeJAControl)
+MeJAControl_df <- as.data.frame(MeJAControl)
+
+tukey_per_sp_SAControl <- lapply(tukey_per_sp, function(x){
+  map(x, 11)
+})
+
+SAControl <- unlist(tukey_per_sp_SAControl)
+SAControl_df <- as.data.frame(SAControl)
+
+tukey_per_sp_SAMeJA <- lapply(tukey_per_sp, function(x){
+  map(x, 12)
+})
+
+SAMeJA <- unlist(tukey_per_sp_SAMeJA)
+SAMeJA_df <- as.data.frame(SAMeJA)
+
+
+#Merge into one single df
+#list_tukey_dfs <- list(SAMeJA_df, SAControl_df, MeJAControl_df)
+biomass_tukey_df <- merge(((MeJAControl_df)), ((SAControl_df)), by = 0, all = T)
+rownames(biomass_tukey_df) <- biomass_tukey_df$Row.names; biomass_tukey_df$Row.names <- NULL
+biomass_tukey_df_v2 <- merge(biomass_tukey_df, ((SAMeJA_df)), by = "row.names", all = T)
+rownames(biomass_tukey_df_v2) <- biomass_tukey_df_v2$Row.names; biomass_tukey_df_v2$Row.names <- NULL
+write.table(biomass_tukey_df_v2, file="./15_Plant_Biomass/Results/biomass_tukey_df_v2.txt",
+sep = "\t", quote = F, row.names = T)
+
+
+```
+
+#Not finished DF for shapiro results
+```{r}
+list_names_shapiro <- names(shapiro_per_sp)
+shapiro_per_sp_sub <- lapply(list_names_shapiro, function(x){
+  shapiro_per_sp[[x]][c("p.value")]
+})
+```
+
+#Failed attempts
+```{r}
+
+tukey_output_to_plot_input <- function(tukey_output_l){
+  
+#select the p-values for each pair of stress factor  
+  
+p_values_MeJA_Cntrl_l <- map(tukey_output_l, 10) #MeJA Cntrl
+p_values_SA_Cntrl_l <- map(tukey_output_l, 11) #SA Cntrl
+p_values_SA_MeJA_l <- map(tukey_output_l, 12) #SA MeJa
+list_lenght<-length(p_values_MeJA_Cntrl_l)
+
+vector_MeJA_Cntrl <- as.vector(unlist(p_values_MeJA_Cntrl_l, use.names = FALSE))
+vector_SA_Cntrl <- as.vector(unlist(p_values_SA_Cntrl_l, use.names = FALSE))
+vector_SA_MeJA <- as.vector(unlist(p_values_SA_MeJA_l, use.names = FALSE))
+
+p_values <- c(vector_MeJA_Cntrl,
+            vector_SA_Cntrl,
+            vector_SA_MeJA)
+
+list_lenght<-length(p_values_MeJA_Cntrl_l)
+
+stress <-c(rep("MeJA-Cntrl", list_lenght),
+               rep("SA-Cntrl", list_lenght),
+               rep("SA-MeJA", list_lenght))
+
+
+#join vectors in a dataframe
+p_df<- data.frame(p_values, # p values for the stress and then for the block
+                     # species_name, # names of species in list
+                     stress) # Stress and block as factors
+
+}
+
+tukey_padjvalues <- tukey_output_to_plot_input(F1_df)
+#merge v2 listing vectors
+vector_MeJA_Cntrl <- as.vector(unlist(tukey_per_sp_MeJAControl, use.names = FALSE))
+vector_SA_Cntrl <- as.vector(unlist(tukey_per_sp_SAControl, use.names = FALSE))
+vector_SA_MeJA <- as.vector(unlist(tukey_per_sp_SAMeJA, use.names = FALSE))
+
+p_values <- c(vector_MeJA_Cntrl,
+vector_SA_Cntrl,
+vector_SA_MeJA)
+
+
+list_lenght<-length(tukey_per_sp_MeJAControl)
+
+stress <-c(rep("MeJA-Cntrl", list_lenght),
+ rep("SA-Cntrl", list_lenght),
+ rep("SA-MeJA", list_lenght))
+
+p_df<- data.frame(p_values, # p values for the stress and then for the block
+ # species_name, # names of species in list
+stress) # Stress and block as factors
+
+vector_list_df <- data.frame(vector_list)
+```
+

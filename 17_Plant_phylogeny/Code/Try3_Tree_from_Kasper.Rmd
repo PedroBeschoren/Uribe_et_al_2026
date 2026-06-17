@@ -1,0 +1,240 @@
+---
+title: "Untitled"
+author: "Marcela Aragon"
+date: "31/1/2024"
+output: html_document
+---
+
+# 1.0 set up working environemnt
+
+## load libraries
+
+```{r}
+
+renv::deactivate()
+
+# set working directory to project directory 
+
+#data
+library("phyloseq") #microbial data
+library("vegan") #microbial data
+library("ggpubr") 
+library("dplyr")
+library("tidyr")
+library("tibble")
+library("purrr") #works with lists
+library("readxl") 
+library("plyr")
+library("ggplotify") #change as.grob
+library("gridExtra")
+
+#plots/visualizations
+library("ggplot2")
+library("heatmaply")
+library("pheatmap")
+library("RColorBrewer")
+library("viridis")
+library("grid") #change as.grob
+library("lattice")
+library("ggplotify") #change as.grob
+#library("ggpmisc") #plots R2 and regression lines
+
+#stats
+library("car") # for Levene's test
+library("ade4") #multi-variate analysis
+library("stats") #cophenetic distances 
+ 
+#phylo
+library("seqinr") #to read alignments
+library("adephylo")
+library("phylobase")
+library("phylosignal")
+library("ape") #handles phylogenetic objects
+library("TreeTools")
+library("tidytree")
+library("phytools") 
+library("phangorn") #UPGMA & NJ
+library("distory") #to compare trees
+library("geiger")
+
+# increases memory limit used by R
+memory.limit(size = 500000)
+
+#load some relevant custom functionseveyrone uses, like lapply_lapply
+source("./renv/functions/lapply_lapply.R")
+
+```
+
+
+## 1.02 Settings for plots
+
+```{r}
+# Set axis looks
+theme_set(theme_bw())
+axis_looks <- theme(axis.text.x = element_text(colour = "black", size = 10,
+                                               face = "bold"))+
+  theme(axis.text.y = element_text(colour = "black", size = 12, face = "bold"))+
+  theme(axis.title=element_text(size=15, face = "bold"))
+```
+
+
+## 1.03 Load data & metadata
+
+I'll load the .fas concatenated file first as well as the excel file with the species code from Kasper and our metadata to change later the species names.
+
+
+**I need to re-order plant phylogeny in same folder, instead of in 14_Phylogenetic_distance**
+
+```{r}
+
+#load species code from .xsl file
+sp_Kasper <- read_excel("./14_Phylogenetic_distance/Genetic_alignments_KasperH/2023-11-16_Brassicaceae_crop_genetic_data_for_MarcelaAG.xlsx")
+
+#Load alignment data
+alignment <- ape::read.dna(file = "./14_Phylogenetic_distance/Genetic_alignments_KasperH/2023-11-20_Concatenated_codon_aware_alignments_for_Brassica_crop_project_Marcela_Aragon-Gomez.fas", format = "fasta")
+
+#Load new plant phylogenetic tree
+Bra_tree <- read.tree("./17_Plant_phylogeny/Results/BrassiToL_supermatrix.tree")
+plot(Bra_tree) #coded as sample name
+summary(Bra_tree) #23 tips 
+
+#Load phyloseq metadata
+# this will load the CSS-normalized 16S and ITS data as a list of two objects
+load("./Data/phyloseq_objects/CSS_BacFun_rhizoplane_HighFilt_ps_l.RData")
+
+#View
+CSS_BacFun_rhizoplane_HighFilt_ps_l
+
+#Get only metadata df
+sp_Family <- sample_data(CSS_BacFun_rhizoplane_HighFilt_ps_l$Bac)
+
+#clean
+rm(CSS_BacFun_rhizoplane_HighFilt_ps_l)
+
+```
+
+## 1.04 Arranging data
+
+```{r}
+
+#Clean Family metadata
+
+#Get info from plant species kept for the analysis 
+sp_Family2 <- sp_Family %>%
+                   as_tibble() %>%
+                   dplyr::filter(Sp_Family == "Brassicaceae")%>%
+                   dplyr::select(Sp_full_name, Sp_abb_name, MY_tree_presence)
+
+sp_Family3 <- sp_Family2%>%
+                   distinct(Sp_full_name, Sp_abb_name, MY_tree_presence) #there are 26 different species originally
+
+#Remove Kimmeridge and the pther two speeds (F and S) of B.ole as they were not included in the overall analysis 
+sp_Family4 <- sp_Family3%>%
+                   dplyr::filter(!Sp_abb_name %in% c("Bo_F", "Bo_S", "BoK"))%>%
+                   droplevels() #23 species now 
+
+#Arrange Kasper's data 
+#Now, make a single df with Kasper's coding
+sp_Kasper
+
+#For this, I need to match our species names with those of Kasper
+sp_Family4$Sp_full_name #23 species 
+sp_Kasper$Species #23 species (all of the species without B_Kimmerdige)
+
+#Let's add a "_" to Kasper's species names
+sp_Kasper$Species <- sub(" ", "_", sp_Kasper$Species)
+sp_Kasper$Species <- as.factor(sp_Kasper$Species)
+sp_Kasper$Sample <- as.factor(sp_Kasper$Sample)
+sp_Kasper$Tribe <- as.factor(sp_Kasper$Tribe)
+
+#For now, let's change the name of Mutarda_nigra and Mutarda_arvensis for Brassica and Sinapis, respectively, as well as same name for Bole
+sp_Kasper2 <- sp_Kasper
+sp_Kasper2$Species <- revalue(sp_Kasper2$Species, c("Mutarda_arvensis"="Sinapis_arvensis", "Mutarda_nigra"="Brassica_nigra", "Brassica_oleracea"="Brassica_oleraceae_Rivera_Medium")) #works
+
+#change colname of 'Species' to same as family
+sp_Kasper3 <- sp_Kasper2
+colnames(sp_Kasper3)[3] <- colnames(sp_Family4)[1]
+
+#let's check
+test <- full_join(sp_Family4, sp_Kasper3, by="Sp_full_name")
+View(test)
+
+# 5 names of our species are wrong (sorry!) for now I'll leave them misspelled but will change later in metadata
+sp_Kasper4 <- sp_Kasper3
+sp_Kasper4$Sp_full_name <- revalue(sp_Kasper4$Sp_full_name, 
+                                 c("Descurainia_sophia"="Descurainia_sophiades",
+                                   "Erysimum_cheiranthoides"="Erysium_cheirantoides",
+                                   "Euclidium_syriacum"="Euclydium_syriacum",
+                                   "Malcolmia_maritima"="Malcomia_maritima",
+                                   "Sisymbrium_irio"= "Sysimbrium_irio")) 
+
+#let's check again
+df_species <- full_join(sp_Family4, sp_Kasper4, by="Sp_full_name") #now it works!
+View(df_species)
+
+#let's clean 
+rm(sp_Family, sp_Family2, sp_Family3, sp_Family4, sp_Kasper, sp_Kasper2, sp_Kasper3, sp_Kasper4, test)
+
+```
+
+**Change species names for correct ones in our data**
+
+
+## 1.05 Arranging plant phylogeny
+
+```{r}
+
+Bra_tree
+plot(Bra_tree)
+
+#get tip labels
+tips <- Bra_tree$tip.label
+#make if a df
+tips2 <- tips%>%
+         as_tibble()%>%
+         dplyr::rename(., Sample=value)
+#get only Sample and Sp code 
+sel <- df_species%>%
+       select(Sample, Sp_abb_name)
+#make a new df 
+tips3 <- left_join(tips2, sel)
+
+#check if same order as tree tips
+tips
+tips3$Sample #yes
+
+#make character vector with new sp names in order
+new_tips <- as.character(tips3$Sp_abb_name)
+
+#now replace with sp names
+Bra_tree$tip.label <- new_tips
+plot(Bra_tree)
+axisPhylo()
+
+#check the tree
+summary.phylo(Bra_tree)
+is.rooted(Bra_tree) #no
+is.ultrametric(Bra_tree) #no
+
+#save it
+write.tree(Bra_tree, file = "./17_Plant_phylogeny/Results/Supermatrix_Kasper_tree_renamed.tre")
+
+#The order is weird, so in order to rotate clades as we had them in old tree I will export the Supermatrix_Kasper_tree_renamed.tre file
+#Into iTOL and rotate branches in there (as it is way easier than in R)
+#then I will export that treee and import it again here 
+
+#change order in iTOL, see if it works. Yes it does! :)
+Bra_tre2 <- read.tree("./17_Plant_phylogeny/Results/Supermatrix_Kasper_tree_renamed_rotated.tre")
+plot(Bra_tre2) #much better
+
+#Still it is a bit weird that it is not rooted, so I'll do that again in iTOl and export it back
+Bra_tre3 <- read.tree("./17_Plant_phylogeny/Results/Supermatrix_Kasper_tree_renamed_rotated_rooted.tre")
+plot(Bra_tre3) #even better
+
+#save it
+write.tree(Bra_tre3, file = "./17_Plant_phylogeny/Results/Supermatrix_Kasper_tree_Final_28-08-24.tre")
+
+#This is our final tree, now it can be used for figures and analysis
+
+```
+

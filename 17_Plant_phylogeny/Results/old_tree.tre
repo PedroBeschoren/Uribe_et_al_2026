@@ -1,0 +1,125 @@
+#NEXUS
+begin taxa;
+	dimensions ntax=23;
+	taxlabels
+	Aethionema_arabicum
+	Arabidopsis_lyrata
+	Arabidopsis_thaliana
+	Barbarea_vulgaris_c
+	Berteroa_incana_c
+	Brassica_nigra
+	Brassica_oleracea
+	Brassica_rapa
+	Camelina_sativa
+	Cochlearia_officinalis_c
+	Descurainia_sophiades
+	Diplotaxis_tenuifolia
+	Erysimum_cheirantoides_c
+	Euclidium_syriacum
+	Hirschfeldia_incana
+	Iberis_amara
+	Isatis_tinctoria
+	Lepidium_ruderale_c
+	Lobularia_maritima
+	Malcolmia_maritima
+	Sinapis_arvensis
+	Sisymbrium_irio
+	Turritis_glabra
+;
+end;
+
+begin trees;
+	tree tree_1 = [&R] (((((((((Arabidopsis_thaliana[&!color=#66ccff]:5.288935,Arabidopsis_lyrata[&!color=#66ccff]:5.288935)[&!color=#66ccff]:2.287615,Camelina_sativa[&!color=#66ccff]:7.57655)[&!color=#66ccff]:0.79035,Turritis_glabra[&!color=#66ccff]:8.366899)[&!color=#66ccff]:1.059627,(Erysimum_cheirantoides_c[&!color=#66ccff]:6.955827,Malcolmia_maritima[&!color=#66ccff]:6.955827)[&!color=#66ccff]:2.470698)[&!color=#66ccff]:9.120077,Barbarea_vulgaris_c[&!color=#66ccff]:18.546602)[&!color=#66ccff]:0.221376,Lepidium_ruderale_c[&!color=#66ccff]:18.767978)[&!color=#66ccff]:1.214605,Descurainia_sophiades[&!color=#66ccff]:19.982585)[&!color=#66ccff]:5.162208,((Berteroa_incana_c[&!rotate=false,!color=#cc66ff]:21.69073,((((((Brassica_nigra[&!color=#6666ff]:2.379658,Sinapis_arvensis[&!color=#6666ff]:2.379658)[&!color=#6666ff]:3.560342,Hirschfeldia_incana[&!color=#6666ff]:5.94)[&!color=#6666ff]:2.44435,((Brassica_rapa[&!color=#6666ff]:2.18,Brassica_oleracea[&!color=#6666ff]:2.18)[&!color=#6666ff]:4.29,Diplotaxis_tenuifolia[&!color=#6666ff]:6.47)[&!color=#6666ff]:1.914349)[&!color=#6666ff]:4.18312,Sisymbrium_irio[&!color=#6666ff]:12.567468)[&!color=#6666ff]:1.401947,Isatis_tinctoria[&!color=#6666ff]:13.969416)[&!color=#6666ff]:6.871943,(Cochlearia_officinalis_c[&!color=#cc66ff]:18.906337,(Lobularia_maritima[&!color=#cc66ff]:16.906303,Iberis_amara[&!color=#cc66ff]:16.906302)[&!color=#cc66ff]:2.000035)[&!color=#cc66ff]:1.935022)[&!color=#cc66ff]:0.849371)[&!rotate=true,!color=#cc66ff]:2.421017,Euclidium_syriacum[&!color=#003399]:24.111748):1.033045):4.796993,Aethionema_arabicum:29.941785);
+end;
+
+begin figtree;
+	set appearance.backgroundColorAttribute="Default";
+	set appearance.backgroundColour=#ffffff;
+	set appearance.branchColorAttribute="User selection";
+	set appearance.branchColorGradient=false;
+	set appearance.branchLineWidth=2.0;
+	set appearance.branchMinLineWidth=0.0;
+	set appearance.branchWidthAttribute="Fixed";
+	set appearance.foregroundColour=#000000;
+	set appearance.hilightingGradient=false;
+	set appearance.selectionColour=#2d3680;
+	set branchLabels.colorAttribute="User selection";
+	set branchLabels.displayAttribute="Branch times";
+	set branchLabels.fontName="sansserif";
+	set branchLabels.fontSize=10;
+	set branchLabels.fontStyle=0;
+	set branchLabels.isShown=true;
+	set branchLabels.significantDigits=3;
+	set layout.expansion=0;
+	set layout.layoutType="RECTILINEAR";
+	set layout.zoom=0;
+	set legend.attribute=null;
+	set legend.fontSize=10.0;
+	set legend.isShown=false;
+	set legend.significantDigits=4;
+	set nodeBars.barWidth=4.0;
+	set nodeBars.displayAttribute=null;
+	set nodeBars.isShown=false;
+	set nodeLabels.colorAttribute="User selection";
+	set nodeLabels.displayAttribute="Node ages";
+	set nodeLabels.fontName="sansserif";
+	set nodeLabels.fontSize=9;
+	set nodeLabels.fontStyle=0;
+	set nodeLabels.isShown=true;
+	set nodeLabels.significantDigits=2;
+	set nodeShapeExternal.colourAttribute="User selection";
+	set nodeShapeExternal.isShown=false;
+	set nodeShapeExternal.minSize=10.0;
+	set nodeShapeExternal.scaleType=Width;
+	set nodeShapeExternal.shapeType=Circle;
+	set nodeShapeExternal.size=4.0;
+	set nodeShapeExternal.sizeAttribute="Fixed";
+	set nodeShapeInternal.colourAttribute="User selection";
+	set nodeShapeInternal.isShown=true;
+	set nodeShapeInternal.minSize=10.0;
+	set nodeShapeInternal.scaleType=Width;
+	set nodeShapeInternal.shapeType=Circle;
+	set nodeShapeInternal.size=5.0;
+	set nodeShapeInternal.sizeAttribute="Fixed";
+	set polarLayout.alignTipLabels=false;
+	set polarLayout.angularRange=0;
+	set polarLayout.rootAngle=0;
+	set polarLayout.rootLength=100;
+	set polarLayout.showRoot=true;
+	set radialLayout.spread=0.0;
+	set rectilinearLayout.alignTipLabels=false;
+	set rectilinearLayout.curvature=0;
+	set rectilinearLayout.rootLength=100;
+	set scale.offsetAge=0.0;
+	set scale.rootAge=1.0;
+	set scale.scaleFactor=1.0;
+	set scale.scaleRoot=false;
+	set scaleAxis.automaticScale=true;
+	set scaleAxis.fontSize=10.0;
+	set scaleAxis.isShown=true;
+	set scaleAxis.lineWidth=1.0;
+	set scaleAxis.majorTicks=5.0;
+	set scaleAxis.minorTicks=2.5;
+	set scaleAxis.origin=0.0;
+	set scaleAxis.reverseAxis=true;
+	set scaleAxis.showGrid=false;
+	set scaleBar.automaticScale=true;
+	set scaleBar.fontSize=10.0;
+	set scaleBar.isShown=false;
+	set scaleBar.lineWidth=1.0;
+	set scaleBar.scaleRange=3.0;
+	set tipLabels.colorAttribute="User selection";
+	set tipLabels.displayAttribute="Names";
+	set tipLabels.fontName="Arial";
+	set tipLabels.fontSize=12;
+	set tipLabels.fontStyle=1;
+	set tipLabels.isShown=true;
+	set tipLabels.significantDigits=4;
+	set trees.order=false;
+	set trees.orderType="increasing";
+	set trees.rooting=false;
+	set trees.rootingType="User Selection";
+	set trees.transform=false;
+	set trees.transformType="cladogram";
+end;
+

@@ -1,0 +1,10 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+./data/Amplicon_sequencing/16S_phyloseq_input_FeatureTable_metadata_taxonomy.biom
+./data/Amplicon_sequencing/ITS_phyloseq_input_FeatureTable_metadata_taxonomy.biom
+./data/Amplicon_sequencing/16S_dna-sequences.fasta
+./data/Amplicon_sequencing/ITS_dna-sequences.fasta
+./data/Amplicon_sequencing/16S_taxonomy.txt
+./data/Amplicon_sequencing/ITS_taxonomy.txt

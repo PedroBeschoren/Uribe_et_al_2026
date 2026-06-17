@@ -1,0 +1,1 @@
+((((Oryx_leucoryx:20.2,(Ovis_aries:5.4,Ovis_canadensis:5.4):14.8):1.6,Saiga_tatarica:21.8):4.9,(((Alces_alces:15,Capreolus_capreolus:15):1.1,((Odocoileus_hemionus:3.8,Odocoileus_virginianus:3.8):7.4,Rangifer_tarandus:11.2):4.9):1.6,(Axis_axis:12.9,Dama_dama:12.9):4.8):9):0.1,Antilocapra_americana:26.8);

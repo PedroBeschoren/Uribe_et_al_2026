@@ -1,0 +1,460 @@
+---
+title: "3_MU_Rarefaction_curves"
+author: "Melissa"
+date: "2024-12-02"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r, echo =FALSE}
+#Set lib paths
+.libPaths("C:/Family_experiment/renv/library/R-4.1/x86_64-w64-mingw32")
+
+```
+
+```{r}
+library(phyloseq)
+library(vegan)
+library(RColorBrewer)
+library(ggplot2)
+library(dplyr)
+library(ggpubr)
+
+set.seed(123)
+theme_set(theme_classic())
+
+```
+
+#Load the phyloseq objects filtered
+```{r}
+load("./Data/phyloseq_objects/unnormalized_BacFun_rhizoplane_HighFilt_ps_l.RData")
+
+```
+
+#Keep only the 22 species -- maybe we want this rarefaction curve per plant species and not per sample?
+```{r}
+ps_brassicaceae_BacFun_l <- lapply(unnormalized_BacFun_rhizoplane_HighFilt_ps_l, function (x) 
+  subset_samples(x, MY_tree_presence =="inside_MY_tree"))
+
+ps_brassicaceae_BacFun_l
+
+```
+
+#Merge the plant species
+```{r}
+ps_brassicaceae_Bac_Merged_plantsp <- merge_samples(ps_brassicaceae_BacFun_l$Bac, "Sp_abb_name", fun = mean)
+ps_brassicaceae_Fun_Merged_plantsp <- merge_samples(ps_brassicaceae_BacFun_l$Fun, "Sp_abb_name", fun = mean)
+```
+
+#Rarecurves without transposing
+```{r}
+merged_mat_brassi_Bac <- as.matrix(otu_table(ps_brassicaceae_Bac_Merged_plantsp))
+class(merged_mat_brassi_Bac) <- "matrix"
+
+merged_mat_brassi_Fun <- as.matrix(otu_table(ps_brassicaceae_Fun_Merged_plantsp))
+class(merged_mat_brassi_Fun) <- "matrix"
+
+rarecurve_merged_mat_brassi_Bac <- rarecurve(merged_mat_brassi_Bac, step = 100, label = TRUE, tidy = TRUE)
+rarecurve_merged_mat_brassi_Fun <- rarecurve(merged_mat_brassi_Fun, step = 100, label = TRUE, tidy = TRUE)
+
+save(rarecurve_merged_mat_brassi_Bac, file = "C:/Family_experiment/03_Alpha_diversity/r_objects/MU_RarefactionCurves/rarecurve_merged_mat_brassi_Bac.RData")
+save(rarecurve_merged_mat_brassi_Fun, file = "C:/Family_experiment/03_Alpha_diversity/r_objects/MU_RarefactionCurves/rarecurve_merged_mat_brassi_Fun.RData")
+
+```
+
+#Add the Supertribe as an own column and plot
+#Bac
+```{r}
+rarecurve_merged_mat_brassi_Bac$Supertribe <- as.character(rarecurve_merged_mat_brassi_Bac$Site)
+
+rarecurve_merged_mat_brassi_Bac_2 <- rarecurve_merged_mat_brassi_Bac %>% 
+  mutate(Supertribe, case_when(
+    endsWith(Supertribe, "Al") ~ "Camelinodae",
+    endsWith(Supertribe, "At") ~ "Camelinodae",
+    endsWith(Supertribe, "Cas") ~ "Camelinodae",
+    endsWith(Supertribe, "Tg") ~ "Camelinodae",
+    endsWith(Supertribe, "Ec") ~ "Camelinodae",
+    endsWith(Supertribe, "Mm") ~ "Camelinodae",
+    endsWith(Supertribe, "Ds") ~ "Camelinodae",
+    endsWith(Supertribe, "Lr") ~ "Camelinodae",
+    endsWith(Supertribe, "Bv") ~ "Camelinodae",
+    endsWith(Supertribe, "Bi") ~ "Arabodae",
+    endsWith(Supertribe, "Es") ~ "Hesperodae",
+    endsWith(Supertribe, "Br") ~ "Brassicodae",
+    endsWith(Supertribe, "Bo_M") ~ "Brassicodae",
+    endsWith(Supertribe, "Hi") ~ "Brassicodae",
+    endsWith(Supertribe, "Sar") ~ "Brassicodae",
+    endsWith(Supertribe, "Dt") ~ "Brassicodae",
+    endsWith(Supertribe, "Bn") ~ "Brassicodae",
+    endsWith(Supertribe, "It") ~ "Brassicodae",
+    endsWith(Supertribe, "Si") ~ "Brassicodae",
+    endsWith(Supertribe, "Co") ~ "Unplaced",
+    endsWith(Supertribe, "Lm") ~ "Heliophilodae",
+    endsWith(Supertribe, "Ia") ~ "Heliophilodae"
+  ))
+
+rarecurve_merged_mat_brassi_Bac_2$Supertribe <- NULL
+colnames(rarecurve_merged_mat_brassi_Bac_2) <- c("Site", "Sample", "Species", "Supertribe")
+
+colors <- c("Camelinodae"="#de70a8", #same colors as BrassiTol
+            "Arabodae"="#9474e1",
+            "Hesperodae"="#5ab2eb",
+            "Brassicodae"="#10a072",
+            "Unplaced"="#e99c00",
+            "Heliophilodae"="#e05a00")
+
+#Extract the endpoints of each plant species for the label:
+label_data_Bac <- rarecurve_merged_mat_brassi_Bac_2 %>%
+  group_by(Site) %>%
+  slice_max(order_by = Sample, n = 1) 
+
+#Plot
+plot_rarecurve_merged_mat_brassi_Bac_2 <- ggplot(rarecurve_merged_mat_brassi_Bac_2, aes(x = Sample, y = Species, group = Site)) +
+  geom_line(aes(color = Supertribe)) +
+  geom_text(data = label_data_Bac, aes(label = Site, color = Supertribe), 
+            hjust = -0.2,  # Adjust horizontal position to avoid overlap
+            vjust = 0.5,   # Vertical position
+            size = 5) +
+  scale_color_manual(values = colors) +
+  theme_minimal() +
+  labs(x = "Sample Size", y = "Bacterial ASVs")
+
+
+```
+
+#Fun
+```{r}
+rarecurve_merged_mat_brassi_Fun$Supertribe <- as.character(rarecurve_merged_mat_brassi_Fun$Site)
+
+rarecurve_merged_mat_brassi_Fun_2 <- rarecurve_merged_mat_brassi_Fun %>% 
+  mutate(Supertribe, case_when(
+    endsWith(Supertribe, "Al") ~ "Camelinodae",
+    endsWith(Supertribe, "At") ~ "Camelinodae",
+    endsWith(Supertribe, "Cas") ~ "Camelinodae",
+    endsWith(Supertribe, "Tg") ~ "Camelinodae",
+    endsWith(Supertribe, "Ec") ~ "Camelinodae",
+    endsWith(Supertribe, "Mm") ~ "Camelinodae",
+    endsWith(Supertribe, "Ds") ~ "Camelinodae",
+    endsWith(Supertribe, "Lr") ~ "Camelinodae",
+    endsWith(Supertribe, "Bv") ~ "Camelinodae",
+    endsWith(Supertribe, "Bi") ~ "Arabodae",
+    endsWith(Supertribe, "Es") ~ "Hesperodae",
+    endsWith(Supertribe, "Br") ~ "Brassicodae",
+    endsWith(Supertribe, "Bo_M") ~ "Brassicodae",
+    endsWith(Supertribe, "Hi") ~ "Brassicodae",
+    endsWith(Supertribe, "Sar") ~ "Brassicodae",
+    endsWith(Supertribe, "Dt") ~ "Brassicodae",
+    endsWith(Supertribe, "Bn") ~ "Brassicodae",
+    endsWith(Supertribe, "It") ~ "Brassicodae",
+    endsWith(Supertribe, "Si") ~ "Brassicodae",
+    endsWith(Supertribe, "Co") ~ "Unplaced",
+    endsWith(Supertribe, "Lm") ~ "Heliophilodae",
+    endsWith(Supertribe, "Ia") ~ "Heliophilodae"
+  ))
+
+rarecurve_merged_mat_brassi_Fun_2$Supertribe <- NULL
+colnames(rarecurve_merged_mat_brassi_Fun_2) <- c("Site", "Sample", "Species", "Supertribe")
+
+colors <- c("Camelinodae"="#de70a8", #same colors as BrassiTol
+            "Arabodae"="#9474e1",
+            "Hesperodae"="#5ab2eb",
+            "Brassicodae"="#10a072",
+            "Unplaced"="#e99c00",
+            "Heliophilodae"="#e05a00")
+
+#Extract the endpoints of each plant species for the label:
+label_data_Fun <- rarecurve_merged_mat_brassi_Fun_2 %>%
+  group_by(Site) %>%
+  slice_max(order_by = Sample, n = 1) 
+
+plot_rarecurve_merged_mat_brassi_Fun_2 <- ggplot(rarecurve_merged_mat_brassi_Fun_2, aes(x = Sample, y = Species, group = Site)) +
+  geom_line(aes(color = Supertribe)) +
+  geom_text(data = label_data_Fun, aes(label = Site, color = Supertribe), 
+            hjust = -0.2,  # Adjust horizontal position to avoid overlap
+            vjust = 0.5,   # Vertical position
+            size = 5) +
+  scale_color_manual(values = colors) +
+  theme_minimal() +
+  labs(x = "Sample Size", y = "Fungal ASVs")
+
+```
+
+#Arrange the plots
+```{r}
+plot_rarecurve_merged_mat_brassi_BacFun_2 <- ggarrange(plot_rarecurve_merged_mat_brassi_Bac_2, plot_rarecurve_merged_mat_brassi_Fun_2, ncol = 2)
+
+save(plot_rarecurve_merged_mat_brassi_BacFun_2, file = "C:/Family_experiment/03_Alpha_diversity/r_objects/MU_RarefactionCurves/plot_rarecurve_merged_mat_brassi_BacFun_2.RData")
+ggexport(plot_rarecurve_merged_mat_brassi_BacFun_2, filename = "C:/Family_experiment/03_Alpha_diversity/results/MU_RarefactionCurves/plot_rarecurve_merged_mat_brassi_BacFun_2.pdf",
+ ncol = 1, nrow = 1, height=4, width = 10)
+```
+
+
+#divided by stress and then merge per plant species
+```{r}
+ps_brassicaceae_Bac <- ps_brassicaceae_BacFun_l$Bac
+ps_brassicaceae_Control_Bac <- subset_samples(ps_brassicaceae_Bac, Stress %in% "Control")
+ps_brassicaceae_MeJA_Bac <- subset_samples(ps_brassicaceae_Bac, Stress %in% "MeJA")
+ps_brassicaceae_SA_Bac <- subset_samples(ps_brassicaceae_Bac, Stress %in% "SA")
+
+ps_brassicaceae_Fun <- ps_brassicaceae_BacFun_l$Fun
+ps_brassicaceae_Control_Fun <- subset_samples(ps_brassicaceae_Fun, Stress %in% "Control")
+ps_brassicaceae_MeJA_Fun <- subset_samples(ps_brassicaceae_Fun, Stress %in% "MeJA")
+ps_brassicaceae_SA_Fun <- subset_samples(ps_brassicaceae_Fun, Stress %in% "SA")
+
+list_divided_stress <- list(Control_Bac = ps_brassicaceae_Control_Bac, MeJA_Bac = ps_brassicaceae_MeJA_Bac, SA_Bac = ps_brassicaceae_SA_Bac, Control_Fun = ps_brassicaceae_Control_Fun, MeJA_Fun = ps_brassicaceae_MeJA_Fun, SA_Fun = ps_brassicaceae_SA_Fun)
+
+list_divided_stress_Merged <- lapply(list_divided_stress, function(x) merge_samples(x, "Sp_abb_name", fun = mean))
+```
+
+#Rarecurves without transposing
+```{r}
+list_divided_stress_Merged_mat <- lapply(list_divided_stress_Merged, function(x) as(otu_table(x), "matrix"))
+class(list_divided_stress_Merged_mat$Control_Bac)
+rarecurve_list_divided_stress_Merged_mat <- lapply(list_divided_stress_Merged_mat, function(x) rarecurve(x, step = 100, label = TRUE, tidy = TRUE))
+
+save(rarecurve_list_divided_stress_Merged_mat, file = "C:/Family_experiment/03_Alpha_diversity/r_objects/MU_RarefactionCurves/rarecurve_list_divided_stress_Merged_mat.RData")
+```
+
+
+```{r}
+load("C:/Family_experiment/03_Alpha_diversity/r_objects/MU_RarefactionCurves/rarecurve_list_divided_stress_Merged_mat.RData")
+rarecurve_list_divided_stress_Merged_mat_supertribe <- lapply(rarecurve_list_divided_stress_Merged_mat, function(x) { x$Supertribe <- as.character(x$Site);return(x)})
+
+
+rarecurve_list_divided_stress_Merged_mat_supertribe <- lapply(rarecurve_list_divided_stress_Merged_mat_supertribe, function(x) x %>% 
+  mutate(Supertribe, case_when(
+    endsWith(Supertribe, "Al") ~ "Camelinodae",
+    endsWith(Supertribe, "At") ~ "Camelinodae",
+    endsWith(Supertribe, "Cas") ~ "Camelinodae",
+    endsWith(Supertribe, "Tg") ~ "Camelinodae",
+    endsWith(Supertribe, "Ec") ~ "Camelinodae",
+    endsWith(Supertribe, "Mm") ~ "Camelinodae",
+    endsWith(Supertribe, "Ds") ~ "Camelinodae",
+    endsWith(Supertribe, "Lr") ~ "Camelinodae",
+    endsWith(Supertribe, "Bv") ~ "Camelinodae",
+    endsWith(Supertribe, "Bi") ~ "Arabodae",
+    endsWith(Supertribe, "Es") ~ "Hesperodae",
+    endsWith(Supertribe, "Br") ~ "Brassicodae",
+    endsWith(Supertribe, "Bo_M") ~ "Brassicodae",
+    endsWith(Supertribe, "Hi") ~ "Brassicodae",
+    endsWith(Supertribe, "Sar") ~ "Brassicodae",
+    endsWith(Supertribe, "Dt") ~ "Brassicodae",
+    endsWith(Supertribe, "Bn") ~ "Brassicodae",
+    endsWith(Supertribe, "It") ~ "Brassicodae",
+    endsWith(Supertribe, "Si") ~ "Brassicodae",
+    endsWith(Supertribe, "Co") ~ "Unplaced",
+    endsWith(Supertribe, "Lm") ~ "Heliophilodae",
+    endsWith(Supertribe, "Ia") ~ "Heliophilodae"
+  )))
+
+rarecurve_list_divided_stress_Merged_mat_supertribe <- lapply(rarecurve_list_divided_stress_Merged_mat_supertribe, function(x) {x$Supertribe <- NULL;
+return(x)}
+)
+
+rarecurve_list_divided_stress_Merged_mat_supertribe <- lapply(rarecurve_list_divided_stress_Merged_mat_supertribe, function(x) {colnames(x) <- c("Site", "Sample", "Species", "Supertribe");
+return(x)}
+)
+
+#Extract the endpoints of each plant species for the label:
+labels_divided_per_stress <- lapply(rarecurve_list_divided_stress_Merged_mat_supertribe, function(x)
+  x %>%
+  group_by(Site) %>%
+  slice_max(order_by = Sample, n = 1)) 
+
+plot_rarecurve_list_divided_stress_Merged_mat_supertribe <- mapply(function(x, y) {
+  ggplot(x, aes(x = Sample, y = Species, group = Site)) +
+  geom_line(aes(color = Supertribe)) +
+  geom_text(data = y, aes(label = Site, color = Supertribe), 
+            hjust = -0.2,  # Adjust horizontal position to avoid overlap
+            vjust = 0.5,   # Vertical position
+            size = 5) +
+  scale_color_manual(values = c("Camelinodae"="#de70a8", #same colors as BrassiTol
+            "Arabodae"="#9474e1",
+            "Hesperodae"="#5ab2eb",
+            "Brassicodae"="#10a072",
+            "Unplaced"="#e99c00",
+            "Heliophilodae"="#e05a00")) +
+  theme_minimal() +
+  labs(x = "Sample Size", y = "ASVs") +
+  theme(legend.position="none")
+},
+x = rarecurve_list_divided_stress_Merged_mat_supertribe,
+y = labels_divided_per_stress,
+SIMPLIFY = FALSE)
+#check
+plot_rarecurve_list_divided_stress_Merged_mat_supertribe$Control_Fun
+
+save(plot_rarecurve_list_divided_stress_Merged_mat_supertribe, file = "C:/Family_experiment/03_Alpha_diversity/r_objects/MU_RarefactionCurves/plot_rarecurve_list_divided_stress_Merged_mat_supertribe.RData")
+```
+
+#Organize the plots and export
+```{r}
+load("C:/Family_experiment/03_Alpha_diversity/r_objects/MU_RarefactionCurves/plot_rarecurve_list_divided_stress_Merged_mat_supertribe.RData")
+
+arr_plot_rarecurve_list_divided_stress_Merged_mat_supertribe <- ggarrange(plotlist = plot_rarecurve_list_divided_stress_Merged_mat_supertribe, ncol = 3, nrow = 2, labels = names(plot_rarecurve_list_divided_stress_Merged_mat_supertribe))
+
+save(arr_plot_rarecurve_list_divided_stress_Merged_mat_supertribe, file = "C:/Family_experiment/03_Alpha_diversity/r_objects/MU_RarefactionCurves/arr_plot_rarecurve_list_divided_stress_Merged_mat_supertribe.RData")
+ggexport(arr_plot_rarecurve_list_divided_stress_Merged_mat_supertribe, filename = "C:/Family_experiment/03_Alpha_diversity/results/MU_RarefactionCurves/arr_plot_rarecurve_list_divided_stress_Merged_mat_supertribe.pdf",
+ ncol = 1, nrow = 1, height=8, width = 12)
+
+```
+
+
+#Now curves on the unfiltered data?
+#Load the phyloseq objects filtered
+```{r}
+load("./Data/phyloseq_objects/unfiltered_unnormalized_bac_rhizo_ps.RData")
+load("./Data/phyloseq_objects/unfiltered_unnormalized_fun_rhizo_ps.RData")
+```
+
+#CONTINUE HERE
+#Keep only the 22 species 
+```{r}
+inside_my_tree <- c("Al", "At",  "Cas",  "Tg",  "Ec", "Mm", "Ds", "Lr", "Bv",
+ "Bi", "Es", "Br", "Bo_M", "Hi", "Sar", "Dt", "Bn", "It",
+ "Si", "Co", "Lm", "Ia")
+unfilt_ps_brassicaceae_Bac <- subset_samples(unfiltered_unnormalized_bac_rhizo_ps, Sp_abb_name == inside_my_tree)
+
+ps_brassicaceae_BacFun_l
+
+```
+
+#Merge the plant species
+```{r}
+ps_brassicaceae_Bac_Merged_plantsp <- merge_samples(ps_brassicaceae_BacFun_l$Bac, "Sp_abb_name", fun = mean)
+ps_brassicaceae_Fun_Merged_plantsp <- merge_samples(ps_brassicaceae_BacFun_l$Fun, "Sp_abb_name", fun = mean)
+```
+
+#Rarecurves without transposing
+```{r}
+merged_mat_brassi_Bac <- as.matrix(otu_table(ps_brassicaceae_Bac_Merged_plantsp))
+class(merged_mat_brassi_Bac) <- "matrix"
+
+merged_mat_brassi_Fun <- as.matrix(otu_table(ps_brassicaceae_Fun_Merged_plantsp))
+class(merged_mat_brassi_Fun) <- "matrix"
+
+rarecurve_merged_mat_brassi_Bac <- rarecurve(merged_mat_brassi_Bac, step = 100, label = TRUE, tidy = TRUE)
+rarecurve_merged_mat_brassi_Fun <- rarecurve(merged_mat_brassi_Fun, step = 100, label = TRUE, tidy = TRUE)
+
+save(rarecurve_merged_mat_brassi_Bac, file = "C:/Family_experiment/03_Alpha_diversity/r_objects/MU_RarefactionCurves/rarecurve_merged_mat_brassi_Bac.RData")
+save(rarecurve_merged_mat_brassi_Fun, file = "C:/Family_experiment/03_Alpha_diversity/r_objects/MU_RarefactionCurves/rarecurve_merged_mat_brassi_Fun.RData")
+
+```
+
+#Add the Supertribe as an own column and plot
+#Bac
+```{r}
+rarecurve_merged_mat_brassi_Bac$Supertribe <- as.character(rarecurve_merged_mat_brassi_Bac$Site)
+
+rarecurve_merged_mat_brassi_Bac_2 <- rarecurve_merged_mat_brassi_Bac %>% 
+  mutate(Supertribe, case_when(
+    endsWith(Supertribe, "Al") ~ "Camelinodae",
+    endsWith(Supertribe, "At") ~ "Camelinodae",
+    endsWith(Supertribe, "Cas") ~ "Camelinodae",
+    endsWith(Supertribe, "Tg") ~ "Camelinodae",
+    endsWith(Supertribe, "Ec") ~ "Camelinodae",
+    endsWith(Supertribe, "Mm") ~ "Camelinodae",
+    endsWith(Supertribe, "Ds") ~ "Camelinodae",
+    endsWith(Supertribe, "Lr") ~ "Camelinodae",
+    endsWith(Supertribe, "Bv") ~ "Camelinodae",
+    endsWith(Supertribe, "Bi") ~ "Arabodae",
+    endsWith(Supertribe, "Es") ~ "Hesperodae",
+    endsWith(Supertribe, "Br") ~ "Brassicodae",
+    endsWith(Supertribe, "Bo_M") ~ "Brassicodae",
+    endsWith(Supertribe, "Hi") ~ "Brassicodae",
+    endsWith(Supertribe, "Sar") ~ "Brassicodae",
+    endsWith(Supertribe, "Dt") ~ "Brassicodae",
+    endsWith(Supertribe, "Bn") ~ "Brassicodae",
+    endsWith(Supertribe, "It") ~ "Brassicodae",
+    endsWith(Supertribe, "Si") ~ "Brassicodae",
+    endsWith(Supertribe, "Co") ~ "Unplaced",
+    endsWith(Supertribe, "Lm") ~ "Heliophilodae",
+    endsWith(Supertribe, "Ia") ~ "Heliophilodae"
+  ))
+
+rarecurve_merged_mat_brassi_Bac_2$Supertribe <- NULL
+colnames(rarecurve_merged_mat_brassi_Bac_2) <- c("Site", "Sample", "Species", "Supertribe")
+
+colors <- c("Camelinodae"="#de70a8", #same colors as BrassiTol
+            "Arabodae"="#9474e1",
+            "Hesperodae"="#5ab2eb",
+            "Brassicodae"="#10a072",
+            "Unplaced"="#e99c00",
+            "Heliophilodae"="#e05a00")
+
+#Extract the endpoints of each plant species for the label:
+label_data_Bac <- rarecurve_merged_mat_brassi_Bac_2 %>%
+  group_by(Site) %>%
+  slice_max(order_by = Sample, n = 1) 
+
+#Plot
+plot_rarecurve_merged_mat_brassi_Bac_2 <- ggplot(rarecurve_merged_mat_brassi_Bac_2, aes(x = Sample, y = Species, group = Site)) +
+  geom_line(aes(color = Supertribe)) +
+  geom_text(data = label_data_Bac, aes(label = Site, color = Supertribe), 
+            hjust = -0.2,  # Adjust horizontal position to avoid overlap
+            vjust = 0.5,   # Vertical position
+            size = 5) +
+  scale_color_manual(values = colors) +
+  theme_minimal() +
+  labs(x = "Sample Size", y = "Bacterial ASVs")
+
+
+```
+
+#Fun
+```{r}
+rarecurve_merged_mat_brassi_Fun$Supertribe <- as.character(rarecurve_merged_mat_brassi_Fun$Site)
+
+rarecurve_merged_mat_brassi_Fun_2 <- rarecurve_merged_mat_brassi_Fun %>% 
+  mutate(Supertribe, case_when(
+    endsWith(Supertribe, "Al") ~ "Camelinodae",
+    endsWith(Supertribe, "At") ~ "Camelinodae",
+    endsWith(Supertribe, "Cas") ~ "Camelinodae",
+    endsWith(Supertribe, "Tg") ~ "Camelinodae",
+    endsWith(Supertribe, "Ec") ~ "Camelinodae",
+    endsWith(Supertribe, "Mm") ~ "Camelinodae",
+    endsWith(Supertribe, "Ds") ~ "Camelinodae",
+    endsWith(Supertribe, "Lr") ~ "Camelinodae",
+    endsWith(Supertribe, "Bv") ~ "Camelinodae",
+    endsWith(Supertribe, "Bi") ~ "Arabodae",
+    endsWith(Supertribe, "Es") ~ "Hesperodae",
+    endsWith(Supertribe, "Br") ~ "Brassicodae",
+    endsWith(Supertribe, "Bo_M") ~ "Brassicodae",
+    endsWith(Supertribe, "Hi") ~ "Brassicodae",
+    endsWith(Supertribe, "Sar") ~ "Brassicodae",
+    endsWith(Supertribe, "Dt") ~ "Brassicodae",
+    endsWith(Supertribe, "Bn") ~ "Brassicodae",
+    endsWith(Supertribe, "It") ~ "Brassicodae",
+    endsWith(Supertribe, "Si") ~ "Brassicodae",
+    endsWith(Supertribe, "Co") ~ "Unplaced",
+    endsWith(Supertribe, "Lm") ~ "Heliophilodae",
+    endsWith(Supertribe, "Ia") ~ "Heliophilodae"
+  ))
+
+rarecurve_merged_mat_brassi_Fun_2$Supertribe <- NULL
+colnames(rarecurve_merged_mat_brassi_Fun_2) <- c("Site", "Sample", "Species", "Supertribe")
+
+colors <- c("Camelinodae"="#de70a8", #same colors as BrassiTol
+            "Arabodae"="#9474e1",
+            "Hesperodae"="#5ab2eb",
+            "Brassicodae"="#10a072",
+            "Unplaced"="#e99c00",
+            "Heliophilodae"="#e05a00")
+
+#Extract the endpoints of each plant species for the label:
+label_data_Fun <- rarecurve_merged_mat_brassi_Fun_2 %>%
+  group_by(Site) %>%
+  slice_max(order_by = Sample, n = 1) 
+
+plot_rarecurve_merged_mat_brassi_Fun_2 <- ggplot(rarecurve_merged_mat_brassi_Fun_2, aes(x = Sample, y = Species, group = Site)) +
+  geom_line(aes(color = Supertribe)) +
+  geom_text(data = label_data_Fun, aes(label = Site, color = Supertribe), 
+            hjust = -0.2,  # Adjust horizontal position to avoid overlap
+            vjust = 0.5,   # Vertical position
+            size = 5) +
+  scale_color_manual(values = colors) +
+  theme_minimal() +
+  labs(x = "Sample Size", y = "Fungal ASVs")
+
+```

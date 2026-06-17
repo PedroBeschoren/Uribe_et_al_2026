@@ -1,0 +1,133 @@
+---
+title: "MU_07_consolidate_NMandRFandDA_ForGoldenTaxonomies"
+author: "Melissa"
+date: "2023-04-11"
+output:
+  pdf_document: default
+  html_document: default
+editor_options:
+  chunk_output_type: console
+---
+## 5_1.0 load libraries, improve memory use
+```{r results="hide"}
+# this will load all key libraries for the whole project
+source("./renv/0_load_libraries.R")
+```
+
+The objective of this script is to determine Golden ASVs and taxonomies as those most consistently responsive to the treatments by being selected by three different methodologies when comparing the Control microbial communities with those of each of the treatments. 
+
+#DA: Load and prepare (22 sp)
+```{r}
+#Load ASVs detected by two DA tests
+load("./05_Differential_abundance/Objects/MeJA_Bac_conca_two_f.RData")
+load("./05_Differential_abundance/Objects/SA_Bac_conca_two_f.RData")
+load("./05_Differential_abundance/Objects/MeJA_Fun_conca_two_f.RData")
+load("./05_Differential_abundance/Objects/SA_Fun_conca_two_f.RData")
+
+# define species present in the MY tree
+phylo_tips <- c("At", "Al", "Cas", "Tg", "Ec", "Mm", "Bv",
+              "Lr", "Ds", "Bi", "Bn", "Sar", "Hi", "Br", "Bo_M",
+              "Dt", "Si", "It", "Co", "Lm", "Ia", "Es")
+
+
+DA_MeJA_Bac_22sp <- unlist(MeJA_Bac_conca_two_f[names(MeJA_Bac_conca_two_f) %in%  phylo_tips], use.names = F)
+DA_SA_Bac_22sp <- unlist(SA_Bac_conca_two_f[names(SA_Bac_conca_two_f) %in%  phylo_tips],use.names = F)
+DA_MeJA_Fun_22sp <- unlist(MeJA_Fun_conca_two_f[names(MeJA_Fun_conca_two_f) %in%  phylo_tips], use.names = F)
+DA_SA_Fun_22sp <- unlist(SA_Fun_conca_two_f[names(SA_Fun_conca_two_f) %in%  phylo_tips], use.names = F)
+
+DA_ControlMeJA_ControlSA_ASVs_22sp <- list(DA_MeJA_Bac_22sp = DA_MeJA_Bac_22sp, DA_SA_Bac_22sp = DA_SA_Bac_22sp, DA_MeJA_Fun_22sp = DA_MeJA_Fun_22sp, DA_SA_Fun_22sp = DA_SA_Fun_22sp)
+```
+
+
+```{r}
+save(DA_ControlMeJA_ControlSA_ASVs_22sp, 
+     file = "./07_consolidate_all_analysis/Results/DA_ControlMeJA_ControlSA_ASVs_22sp.RData")
+```
+
+#RF: Load and prepare
+```{r}
+#Load list of all detected ASVs
+load("./10_Machine_learning/r_objects/RF_ControlMeJA_ControlSA_ASVs_22sp.RData")
+
+
+
+```
+
+#NM: Load and prepare
+AGREED WITH MELISSA THAT THIS VERSION IS BETTER
+this lsit does not include ASVs that are above neutral in both treatment and control of an individual species. it also removes any asvs that is below in both treatment and control of the same individual species. essentially, it removes some NM ASVs that do not help differentaiting between controls and treatments
+```{r}
+load (file = "./04_Neutral_models/r_objects/differing_ASVs_above_below_l_22sp.RData")
+
+NM_ControlMeJA_ControlSA_ASVs_22sp<- differing_ASVs_above_below_l_22sp
+```
+
+
+#Make sure all ASVs and taxonomies are unique inside their own lists (to prevent having one list with an ASV more than once)
+```{r}
+#ASVs
+DA_ControlMeJA_ControlSA_ASVs_22sp_unique <- lapply(DA_ControlMeJA_ControlSA_ASVs_22sp, function(x) unique(x))
+RF_ControlMeJA_ControlSA_ASVs_22sp_unique <- lapply(RF_ControlMeJA_ControlSA_ASVs_22sp, function(x) unique(x))
+NM_ControlMeJA_ControlSA_ASVs_22sp_unique <- lapply(NM_ControlMeJA_ControlSA_ASVs_22sp, function(x) unique(x))
+
+
+```
+
+
+#Three methods overlap in ASVs: GOLDEN ASVs
+```{r}
+DA_RF_NM_ASVs_intersect <- mapply(function(x,y,z)
+Reduce(intersect, list(x,y,z)),
+x = DA_ControlMeJA_ControlSA_ASVs_22sp_unique,
+y = RF_ControlMeJA_ControlSA_ASVs_22sp_unique,
+z = NM_ControlMeJA_ControlSA_ASVs_22sp_unique,
+  SIMPLIFY = FALSE)
+
+
+# overwrrite fungi, keeping both golden and "silver" ASVs
+DA_RF_NM_ASVs_intersect[3:4] <-
+mapply(function(x,y,z){
+      
+    DA_RF<-Reduce(intersect, list(x,y))
+    DA_NM<-Reduce(intersect, list(x,z))
+    RF_NM<-Reduce(intersect, list(y,z))
+    
+    output<-c(DA_RF, DA_NM, RF_NM)%>%unique()
+    
+    return(output)
+    },
+    
+x = DA_ControlMeJA_ControlSA_ASVs_22sp_unique[3:4],
+y = RF_ControlMeJA_ControlSA_ASVs_22sp_unique[3:4],
+z = NM_ControlMeJA_ControlSA_ASVs_22sp_unique[3:4],
+  SIMPLIFY = FALSE)
+
+
+
+names(DA_RF_NM_ASVs_intersect) <- c("MeJA_Bac_GoldenASVs", "SA_Bac_GoldenASVs", "MeJA_Fun_GoldenASVs", "SA_Fun_GoldenASVs")
+```
+
+
+```{r}
+save(DA_RF_NM_ASVs_intersect, 
+     file = "./07_consolidate_all_analysis/Results/DA_RF_NM_ASVs_intersect.RData")
+```
+
+
+```{r}
+#VennDiagram
+library("ggVennDiagram")
+#Three methods overlap in taxonomies
+Venn_DA_RF_NM_ASVs_intersect <- mapply(function(x,y,z)
+ggVennDiagram(list(x,y,z), category.names = c("DA", "RF","NM"), edge_lty = "dashed", edge_size = 0.01, set_size = 5)
++ scale_fill_gradient(low = "cadetblue1", high = "cadetblue4"),
+x = DA_ControlMeJA_ControlSA_ASVs_22sp_unique,
+y = RF_ControlMeJA_ControlSA_ASVs_22sp_unique,
+z = NM_ControlMeJA_ControlSA_ASVs_22sp_unique,
+  SIMPLIFY = FALSE)
+
+ggexport(plotlist = Venn_DA_RF_NM_ASVs_intersect, filename = "./07_consolidate_all_analysis/Results/Venn_DA_RF_NM_ASVs_intersect.pdf",
+ ncol = 1, nrow = 1, height=10, width = 10)
+
+```
+

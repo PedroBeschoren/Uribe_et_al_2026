@@ -1,0 +1,489 @@
+---
+title: "03_comparing_correlationstoplant_important_taxa"
+author: "Melissa Uribe"
+date: "2023-03-09"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+#Using the file 03_streamine_phylogeny_comparison_PB I will run correlations between the plant phylogeny that we have at the moment (2023/03/09, base substitution) and different subsets of the microbial communities (whole community, important ASVs, and important families (both including all ASVs as well as only the Important ones). The objectve is to test whether some of these subsets, that were selected for their responsiveness to the treatment, increase or decrease the correlation with the plant phylogeny, which will give us insights into which microbial groups have a higher cance of having co-evolved with the Brassicaceae plants.
+
+#As an output we wll have p and r2 values deriving from Pearson and from Spearman for each of the 6 datasets involved (Control + MeJA + SA)(Bac + Fun). This is then 12 p values and 12 r2 values per subset microbial community that is to be tested
+
+#Subsets microbial communities to be tested:
+
+1. Whole community
+2.Important ASVs (DA + RF)
+#As of here, everything will be a subset of 2 depending on taxonomy
+3.f__Comamonadaceae
+4.f__Devosiaceae
+5.f__Oxalobacteraceae
+6.f__Sphingomonadaceae
+7.f__Streptomycetaceae
+8.f__Xanthobacteraceae
+9.f__Xanthomonadaceae
+
+# CONTINUE HERE For fungi
+o__Pleosporales
+
+# PHYLOGENY PIPELINE STREAMLINING
+
+
+# 1.0 - set up working environemnt
+
+
+```{r}
+# set working directory to project directory 
+
+
+library("ape") #handles phylogenetic objects
+library("TreeTools")
+library("tidytree")
+library("lattice")
+library("phangorn") #UPGMA & NJ
+library("ade4")
+library("distory") #to compare trees
+library("geiger")
+library("phytools") 
+library("stats") #cophenetic distances 
+library("heatmaply")
+library("pheatmap")
+library("RColorBrewer")
+library("viridis")
+library("grid") #change as.grob
+library("ggplotify") #change as.grob
+#library("ggpmisc") #plots R2 and regression lines 
+library("Biostrings") #read FASTA seq
+
+#load packages with renv 
+source("./renv/0_load_libraries.R") 
+
+# IMPORTANT: load the custom functions necessary to run this script
+source("./14_Phylogenetic_distance/code/custom_functions_PB.R")
+
+# increases memory limit used by R
+memory.limit(size = 500000)
+
+```
+
+# 2.0 - load and prepare tree
+
+```{r}
+#load base substitution tree 
+Bra_tree <- read.tree("./Plant_phylogeny/Results/ML_renamed_tree.tre") #base substitution tree
+
+#removing Aethionema as it was just the outgroup
+Bra_tree<- drop.tip(Bra_tree, tip = 20, trim.internal = TRUE, rooted = TRUE)
+
+#renaming tips 
+old_tips <- Bra_tree$tip.label
+phylo_tips <- c("Co", "Ia", "Lm", "Si", "Bn", "Sar", "Br", "It", "Bi", "Es", "Ds", "Mm","Ec", "Cas", "At", "Al", "Tg", "Bv", "Lr") #Now Hi, Bo and Dt not included
+
+#change for new names 
+Bra_tree$tip.label[match(old_tips, Bra_tree$tip.label)] <- phylo_tips
+plot(Bra_tree)
+
+#load Mya tree
+Mya_Bra_tree <- read.nexus("./Plant_phylogeny/Results/final_tree.tre")
+plot(Mya_Bra_tree)
+axisPhylo() #adds scale bar in Mya
+nodelabels(Mya_Bra_tree$node.label, adj = 0)
+tiplabels()
+Mya_Bra_tree<- drop.tip(Mya_Bra_tree, tip = "Aethionema_arabicum", trim.internal = TRUE, rooted = TRUE)
+#renaming tips 
+Mya_old_tips <- Mya_Bra_tree$tip.label
+Mya_phylo_tips <- c("At", "Al", "Cas", "Tg", "Ec", "Mm", "Bv",
+              "Lr", "Ds", "Bi", "Bn", "Sar", "Hi", "Br", "Bo.M", #changed Bo_M to Bo so it matches code below
+              "Dt", "Si", "It", "Co", "Lm", "Ia", "Es")
+#change for new names 
+Mya_Bra_tree$tip.label[match(Mya_old_tips, Mya_Bra_tree$tip.label)] <- Mya_phylo_tips
+#Bra_tree$tip.label[Bra_tree$tip.label=="Bo_M"] <- "Bo"
+plot(Mya_Bra_tree)
+```
+
+## 2.1 - CUSTOMIZE: change species in the phylogeny tree
+
+This part is hard-coded, at least for now. with the function keep.tip you can keep only a set of plant sp in the Bra_tree, jsut unsilence the code below the check
+
+in the end of the function, check the tree
+```{r}
+
+# additional tree species filtering
+# keep only species that have a RF prediction above random # removes Ec, Ia, Es.... Sa was not significant in permanova
+# phylo_tips <- c("Co", "Lm", "Si", "Bn", "Sar", "Br", "It", "Bi", "Ds", "Mm", "Cas", "At", "Tg", "Bv", "Lr") 
+# Bra_tree<- keep.tip(Bra_tree, phylo_tips)
+
+#check the tree
+plot(ladderize(Bra_tree, right=TRUE))
+
+# calculate plant phylogenetic distance Fitzpatrick et al., 2019
+pd<-cophenetic.phylo(Bra_tree) 
+pdd<-as.dist(as.matrix(pd))
+
+pd_Mya <- cophenetic.phylo(Mya_Bra_tree)
+pdd_Mya <- as.dist(as.matrix(pd_Mya))
+
+```
+
+
+# 3.0 - load phyloseq object
+
+```{r}
+
+#Now load new ps object with same Chrats filtering both Bac and Fun 
+load("./Data/phyloseq_objects/CSS_BacFun_rhizoplane_HighFilt_ps_l.RData")
+
+```
+
+#Mantel correlations for whole community with base nucleotide substitution tree
+```{r}
+
+# prepare phyloseq object for the rest of the phylogeny pipeline (subset samples, adjust factors)
+CSS_BacFun_l<-lapply(CSS_BacFun_rhizoplane_HighFilt_ps_l, function(x) prepare_ps(ps_obj = x))
+
+# define bray-curtis and jaccard distances for Bac anf Fun under Control, MeJA and SA conditions with a custom function
+Whole_Community_distance_per_stress<-ps_to_distance_per_stress(CSS_BacFun_l)
+
+# change the order os the plant species in the bray-curties tree to reflect the phylogeny tree
+Whole_Community_distance_per_stress <- lapply(Whole_Community_distance_per_stress, function(x) lapply_lapply(x, matrix_order_By_phylo))
+
+# check if orders match; they should all be TRUE!
+lapply(Whole_Community_distance_per_stress, function(x) lapply_lapply(x, check_order))
+
+
+#Pearson
+#run mantel tests of microbial community with plant phylogenies, and then return a df summarizing the results
+Whole_community_pearson_mantel_df <- distance_per_stress_to_mantel_df(Whole_Community_distance_per_stress, correlation_method = "pearson")
+#Save df as table
+write.table(Whole_community_pearson_mantel_df, file = "./14_Phylogenetic_distance/results/MU_Mantel_correlations_with_important_ASVs/Base_substitution_tree_23Mar17/Whole_community_pearson_mantel_df.txt", 
+           sep = "\t", quote = F, row.names = T )
+
+# plot mantel correlations as in the custom function
+Whole_community_pearson_plot_mantel <- plot_mantel_correlations(distance_per_stress_to_mantel_df_output = Whole_community_pearson_mantel_df,quoted_plot_title = "Whole_community_pearson")
+
+#save plot as pdf
+pdf(file = "./14_Phylogenetic_distance/results/MU_Mantel_correlations_with_important_ASVs/Base_substitution_tree_23Mar17/Whole_community_pearson_plot_mantel.pdf", onefile = T, width = 10, height = 5)
+Whole_community_pearson_plot_mantel
+dev.off()
+
+
+#spearman
+#run mantel tests of microbial community with plant phylogenies, and then return a df summarizing the results
+Whole_community_spearman_mantel_df <- distance_per_stress_to_mantel_df(Whole_Community_distance_per_stress, correlation_method = "spearman")
+#Save df as table
+write.table(Whole_community_spearman_mantel_df, file = "./14_Phylogenetic_distance/results/MU_Mantel_correlations_with_important_ASVs/Base_substitution_tree_23Mar17/Whole_community_spearman_mantel_df.txt", 
+           sep = "\t", quote = F, row.names = T )
+
+# plot mantel correlations as in the custom function
+Whole_community_spearman_plot_mantel <- plot_mantel_correlations(distance_per_stress_to_mantel_df_output = Whole_community_spearman_mantel_df,quoted_plot_title = "Whole_community_spearman")
+
+#save plot as pdf
+pdf(file = "./14_Phylogenetic_distance/results/MU_Mantel_correlations_with_important_ASVs/Base_substitution_tree_23Mar17/Whole_community_spearman_plot_mantel.pdf", onefile = T, width = 10, height = 5)
+Whole_community_spearman_plot_mantel
+dev.off()
+
+```
+
+#CONTINUE HERE TO BE ADJUSTED FOR THE NEW TREE: Mantel correlations for whole community with Mya tree and Kendall correlations instead of Pearson
+```{r}
+
+#Changing the source custom functions
+
+  #Change some ps metadata to factor
+sam_data_ps <-  sample_data(CSS_BacFun_rhizoplane_HighFilt_ps_l)[,c(1:9,12:15, 17:25, 29:31)] <- lapply(sample_data(CSS_BacFun_rhizoplane_HighFilt_ps_l)[,c(1:9,12:15, 17:25, 29:31)], as.factor)
+  
+  #substitute "_" for "." in Bo_F/M/S so it does not crash with next functions
+  ps_obj@sam_data$Sp_abb_name<- gsub(pattern = "_",replacement = ".", x = ps_obj@sam_data$Sp_abb_name)
+  
+  #subset ps to only those spp found in the tree
+  ps_sel <- subset_samples(ps_obj, Sp_abb_name %in% host_tree[[4]]) 
+
+# prepare phyloseq object for the rest of the phylogeny pipeline (subset samples, adjust factors)
+CSS_BacFun_l_Mya_Bra_tree <- lapply(CSS_BacFun_rhizoplane_HighFilt_ps_l, function(x) prepare_ps(ps_obj = x))
+
+# define bray-curtis and jaccard distances for Bac anf Fun under Control, MeJA and SA conditions with a custom function
+Whole_Community_distance_per_stress<-ps_to_distance_per_stress(CSS_BacFun_l)
+
+# change the order of the plant species in the bray-curties tree to reflect the phylogeny tree
+Whole_Community_distance_per_stress <- lapply(Whole_Community_distance_per_stress, function(x) lapply_lapply(x, matrix_order_By_phylo))
+
+# check if orders match; they should all be TRUE!
+lapply(Whole_Community_distance_per_stress, function(x) lapply_lapply(x, check_order))
+
+
+#Pearson
+#run mantel tests of microbial community with plant phylogenies, and then return a df summarizing the results
+Whole_community_pearson_mantel_df <- distance_per_stress_to_mantel_df(Whole_Community_distance_per_stress, correlation_method = "pearson")
+#Save df as table
+write.table(Whole_community_pearson_mantel_df, file = "./14_Phylogenetic_distance/results/MU_Mantel_correlations_with_important_ASVs/Base_substitution_tree_23Mar17/Whole_community_pearson_mantel_df.txt", 
+           sep = "\t", quote = F, row.names = T )
+
+# plot mantel correlations as in the custom function
+Whole_community_pearson_plot_mantel <- plot_mantel_correlations(distance_per_stress_to_mantel_df_output = Whole_community_pearson_mantel_df,quoted_plot_title = "Whole_community_pearson")
+
+#save plot as pdf
+pdf(file = "./14_Phylogenetic_distance/results/MU_Mantel_correlations_with_important_ASVs/Base_substitution_tree_23Mar17/Whole_community_pearson_plot_mantel.pdf", onefile = T, width = 10, height = 5)
+Whole_community_pearson_plot_mantel
+dev.off()
+
+
+#spearman
+#run mantel tests of microbial community with plant phylogenies, and then return a df summarizing the results
+Whole_community_spearman_mantel_df <- distance_per_stress_to_mantel_df(Whole_Community_distance_per_stress, correlation_method = "spearman")
+#Save df as table
+write.table(Whole_community_spearman_mantel_df, file = "./14_Phylogenetic_distance/results/MU_Mantel_correlations_with_important_ASVs/Base_substitution_tree_23Mar17/Whole_community_spearman_mantel_df.txt", 
+           sep = "\t", quote = F, row.names = T )
+
+# plot mantel correlations as in the custom function
+Whole_community_spearman_plot_mantel <- plot_mantel_correlations(distance_per_stress_to_mantel_df_output = Whole_community_spearman_mantel_df,quoted_plot_title = "Whole_community_spearman")
+
+#save plot as pdf
+pdf(file = "./14_Phylogenetic_distance/results/MU_Mantel_correlations_with_important_ASVs/Base_substitution_tree_23Mar17/Whole_community_spearman_plot_mantel.pdf", onefile = T, width = 10, height = 5)
+Whole_community_spearman_plot_mantel
+dev.off()
+
+```
+
+
+#Important Families Whole community
+#For bacterial families
+```{r}
+# subset the ps object to only include families that are important in the fisher test and overlap DA and RF
+CSS_BacFun_l_f__Comamonadaceae <-
+subset_taxa(physeq = CSS_BacFun_l$Bac, Family %in% c("f__Comamonadaceae"))
+CSS_BacFun_l_f__Devosiaceae <-
+subset_taxa(physeq = CSS_BacFun_l$Bac, Family %in% c("f__Devosiaceae"))
+CSS_BacFun_l_f__Rhizobiaceae <-
+subset_taxa(physeq = CSS_BacFun_l$Bac, Family %in% c("f__Rhizobiaceae"))
+CSS_BacFun_l_f__Oxalobacteraceae <-
+subset_taxa(physeq = CSS_BacFun_l$Bac, Family %in% c("f__Oxalobacteraceae"))
+CSS_BacFun_l_f__Sphingomonadaceae <-
+subset_taxa(physeq = CSS_BacFun_l$Bac, Family %in% c("f__Sphingomonadaceae"))
+CSS_BacFun_l_f__Streptomycetaceae <-
+subset_taxa(physeq = CSS_BacFun_l$Bac, Family %in% c("f__Streptomycetaceae"))
+CSS_BacFun_l_f__Xanthobacteraceae <-
+subset_taxa(physeq = CSS_BacFun_l$Bac, Family %in% c("f__Xanthobacteraceae"))
+CSS_BacFun_l_f__Xanthomonadaceae <-
+subset_taxa(physeq = CSS_BacFun_l$Bac, Family %in% c("f__Xanthomonadaceae"))
+
+Whole_community_BacFamilies_l <- list(
+"f__Comamonadaceae" = CSS_BacFun_l_f__Comamonadaceae,
+"f__Devosiaceae" = CSS_BacFun_l_f__Devosiaceae,
+"f__Rhizobiaceae" = CSS_BacFun_l_f__Rhizobiaceae,
+"f__Oxalobacteraceae" = CSS_BacFun_l_f__Oxalobacteraceae,
+"f__Sphingomonadaceae" = CSS_BacFun_l_f__Sphingomonadaceae,
+"f__Streptomycetaceae" = CSS_BacFun_l_f__Streptomycetaceae,
+"f__Xanthobacteraceae" = CSS_BacFun_l_f__Xanthobacteraceae,
+"f__Xanthomonadaceae" = CSS_BacFun_l_f__Xanthomonadaceae)
+
+```
+
+
+
+
+#Investigate this warnings
+Warning messages:
+1: In vegdist(c(6.83217517451704, 6.98946121645028, 6.62653780837478,  :
+  you have empty rows: their dissimilarities may be meaningless in method “bray”
+2: In vegdist(c(6.83217517451704, 6.98946121645028, 6.62653780837478,  :
+  you have empty rows: their dissimilarities may be meaningless in method “jaccard”
+3: In vegdist(c(6.86964971769, 6.40532332080142, 7.20951692518564,  :
+  you have empty rows: their dissimilarities may be meaningless in method “bray”
+4: In vegdist(c(6.86964971769, 6.40532332080142, 7.20951692518564,  :
+  you have empty rows: their dissimilarities may be meaningless in method “jaccard”
+  #Same as with the important ASVs so its not about the low ASV number within Devosiaceae and Streptomycetaceae
+
+```{r}
+# define bray-curtis and jaccard distances for Bac anf Fun under Control, MeJA and SA conditions with a custom function
+Whole_community_Fam_BP_distance_per_stress <-lapply(Whole_community_BacFamilies_l, function(x) ps_to_distance_per_stress_1kingdom(x))
+
+
+
+# change the order of the plant species in the bray-curtis tree to reflect the phylogeny tree
+Whole_community_Fam_BP_distance_per_stress <- lapply(Whole_community_Fam_BP_distance_per_stress, function(x) lapply_lapply(x, matrix_order_By_phylo))
+
+# check if orders match; they should all be TRUE!
+lapply(Whole_community_Fam_BP_distance_per_stress, function(x) lapply_lapply(x, check_order))
+
+#Pearson
+#run mantel tests of microbial community with plant phylogenies, and then return a df summarizing the results
+Whole_community_Fam_BP_pearson_mantel_df <- lapply(Whole_community_Fam_BP_distance_per_stress, function(x) distance_per_stress_to_mantel_df_1kingdom(x, correlation_method = "pearson"))
+
+#Save df as table
+write.table(Whole_community_Fam_BP_pearson_mantel_df, file = "./14_Phylogenetic_distance/results/MU_Mantel_correlations_with_important_ASVs/Base_substitution_tree_23Mar17/Whole_community_Fam_BP_pearson_mantel_df.txt", 
+           sep = "\t", quote = F, row.names = T )
+
+```
+
+
+
+## 3.1 - CUSTOMIZE: change phyloseq object by subsetting to only the important ASVs
+```{r}
+
+# laod list fo ASVs that were differentially abudnant or important in RF  in a species-by-species analsyis of all brassiceeaceae
+load(file = "./07_consolidate_all_analysis/r_objects/unique_ASVs_l.RData")
+unique_ASVs_l
+
+# filter ps_object to only include ASVs found in DA or RF 
+Important_ASVs <-mapply(function(ps_l, taxa_l) 
+  prune_taxa(taxa = taxa_l, 
+             x = ps_l),
+  taxa_l = unique_ASVs_l,
+  ps_l = CSS_BacFun_rhizoplane_HighFilt_ps_l,
+  SIMPLIFY = FALSE)
+
+#adjust names of the list above, IMPORTANT to continue with pipeline
+names(Important_ASVs)<-c("Bac", "Fun")
+```
+
+
+# 3.0 - Mantel test: execute the phylogeny pipeline on your ps_obj by running this chunk!
+phylo_tips should be defined in your global enviroment, and must be present in Bra_tree$phylo_tips. edit this directly on chunk #2.1
+
+```{r}
+# prepare phyloseq object for the rest of the phylogeny pipeline (subset samples to rm plants that are ot in the phylogeny, adjust factors)
+Important_ASVs_Basephylogeny <-lapply(Important_ASVs, function(x) prepare_ps(ps_obj = x))
+
+# define bray-curtis and jaccard distances for Bac anf Fun under Control, MeJA and SA conditions with a custom function
+Important_ASVs_BP_distance_per_stress <- ps_to_distance_per_stress(Important_ASVs_Basephylogeny)
+
+# change the order of the plant species in the bray-curtis tree to reflect the phylogeny tree
+Important_ASVs_BP_distance_per_stress <- lapply(Important_ASVs_BP_distance_per_stress, function(x) lapply_lapply(x, matrix_order_By_phylo))
+
+# check if orders match; they should all be TRUE!
+lapply(Important_ASVs_BP_distance_per_stress, function(x) lapply_lapply(x, check_order))
+
+#Pearson
+#run mantel tests of microbial community with plant phylogenies, and then return a df summarizing the results
+Important_ASVs_BP_pearson_mantel_df <- distance_per_stress_to_mantel_df(Important_ASVs_BP_distance_per_stress, correlation_method = "pearson")
+#Save df as table
+write.table(Important_ASVs_BP_pearson_mantel_df, file = "./14_Phylogenetic_distance/results/MU_Mantel_correlations_with_important_ASVs/Base_substitution_tree_23Mar17/Important_ASVs_BP_pearson_mantel_df.txt", 
+           sep = "\t", quote = F, row.names = T )
+
+# plot mantel correlations as in the custom function
+Important_ASVs_BP_pearson_plot_mantel <- plot_mantel_correlations(distance_per_stress_to_mantel_df_output = Important_ASVs_BP_pearson_mantel_df,quoted_plot_title = "Important_ASVs_BP_pearson")
+
+#save plot as pdf
+pdf(file = "./14_Phylogenetic_distance/results/MU_Mantel_correlations_with_important_ASVs/Base_substitution_tree_23Mar17/Important_ASVs_BP_pearson_plot_mantel.pdf", onefile = T, width = 10, height = 5)
+Important_ASVs_BP_pearson_plot_mantel
+dev.off()
+
+
+#spearman
+#run mantel tests of microbial community with plant phylogenies, and then return a df summarizing the results
+Important_ASVs_BP_spearman_mantel_df <- distance_per_stress_to_mantel_df(Important_ASVs_BP_distance_per_stress, correlation_method = "spearman")
+#Save df as table
+write.table(Important_ASVs_BP_spearman_mantel_df, file = "./14_Phylogenetic_distance/results/MU_Mantel_correlations_with_important_ASVs/Base_substitution_tree_23Mar17/Important_ASVs_BP_spearman_mantel_df.txt", 
+           sep = "\t", quote = F, row.names = T )
+
+# plot mantel correlations as in the custom function
+Important_ASVs_BP_spearman_plot_mantel <- plot_mantel_correlations(distance_per_stress_to_mantel_df_output = Important_ASVs_BP_spearman_mantel_df,quoted_plot_title = "Important_ASVs_BP_spearman")
+
+#save plot as pdf
+pdf(file = "./14_Phylogenetic_distance/results/MU_Mantel_correlations_with_important_ASVs/Base_substitution_tree_23Mar17/Important_ASVs_BP_spearman_plot_mantel.pdf", onefile = T, width = 10, height = 5)
+Important_ASVs_BP_spearman_plot_mantel
+dev.off()
+
+```
+
+#For bacterial families
+```{r}
+# subset the ps object to only include families that are important in the fisher test and overlap DA and RF
+Important_ASVs_Basephylogeny_f__Comamonadaceae <-
+subset_taxa(physeq = Important_ASVs_Basephylogeny$Bac, Family %in% c("f__Comamonadaceae"))
+Important_ASVs_Basephylogeny_f__Devosiaceae <-
+subset_taxa(physeq = Important_ASVs_Basephylogeny$Bac, Family %in% c("f__Devosiaceae"))
+Important_ASVs_Basephylogeny_f__Rhizobiaceae <-
+subset_taxa(physeq = Important_ASVs_Basephylogeny$Bac, Family %in% c("f__Rhizobiaceae"))
+Important_ASVs_Basephylogeny_f__Oxalobacteraceae <-
+subset_taxa(physeq = Important_ASVs_Basephylogeny$Bac, Family %in% c("f__Oxalobacteraceae"))
+Important_ASVs_Basephylogeny_f__Sphingomonadaceae <-
+subset_taxa(physeq = Important_ASVs_Basephylogeny$Bac, Family %in% c("f__Sphingomonadaceae"))
+Important_ASVs_Basephylogeny_f__Streptomycetaceae <-
+subset_taxa(physeq = Important_ASVs_Basephylogeny$Bac, Family %in% c("f__Streptomycetaceae"))
+Important_ASVs_Basephylogeny_f__Xanthobacteraceae <-
+subset_taxa(physeq = Important_ASVs_Basephylogeny$Bac, Family %in% c("f__Xanthobacteraceae"))
+Important_ASVs_Basephylogeny_f__Xanthomonadaceae <-
+subset_taxa(physeq = Important_ASVs_Basephylogeny$Bac, Family %in% c("f__Xanthomonadaceae"))
+
+Important_ASVs_BacFamilies_l <- list(
+"f__Comamonadaceae" = Important_ASVs_Basephylogeny_f__Comamonadaceae,
+"f__Devosiaceae" = Important_ASVs_Basephylogeny_f__Devosiaceae,
+"f__Rhizobiaceae" = Important_ASVs_Basephylogeny_f__Rhizobiaceae,
+"f__Oxalobacteraceae" = Important_ASVs_Basephylogeny_f__Oxalobacteraceae,
+"f__Sphingomonadaceae" = Important_ASVs_Basephylogeny_f__Sphingomonadaceae,
+"f__Streptomycetaceae" = Important_ASVs_Basephylogeny_f__Streptomycetaceae,
+"f__Xanthobacteraceae" = Important_ASVs_Basephylogeny_f__Xanthobacteraceae,
+"f__Xanthomonadaceae" = Important_ASVs_Basephylogeny_f__Xanthomonadaceae)
+
+```
+
+```{r}
+# define bray-curtis and jaccard distances for Bac anf Fun under Control, MeJA and SA conditions with a custom function
+Important_ASVs_Fam_BP_distance_per_stress <-lapply(Important_ASVs_BacFamilies_l, function(x) ps_to_distance_per_stress_1kingdom(x))
+
+
+  
+#We think this is caused by Devosiaceae and Streptomycetaceae that only have 8 ASVs. For now I'll continue and run this also on the same families but using whole community (so much higher number of ASVs) to evaluate the outputs and see how bi of a problem this may be
+
+# change the order of the plant species in the bray-curtis tree to reflect the phylogeny tree
+Important_ASVs_Fam_BP_distance_per_stress <- lapply(Important_ASVs_Fam_BP_distance_per_stress, function(x) lapply_lapply(x, matrix_order_By_phylo))
+
+# check if orders match; they should all be TRUE!
+lapply(Important_ASVs_Fam_BP_distance_per_stress, function(x) lapply_lapply(x, check_order))
+
+#run mantel tests of microbial community with plant phylogenies, and then return a df summarizing the results
+#Pearson
+#run mantel tests of microbial community with plant phylogenies, and then return a df summarizing the results
+Important_ASVs_Fam_BP_pearson_mantel_df <- lapply(Important_ASVs_Fam_BP_distance_per_stress, function(x) distance_per_stress_to_mantel_df_1kingdom(x, correlation_method = "pearson"))
+
+#Save df as table
+write.table(Important_ASVs_Fam_BP_pearson_mantel_df, file = "./14_Phylogenetic_distance/results/MU_Mantel_correlations_with_important_ASVs/Base_substitution_tree_23Mar17/Important_ASVs_Fam_BP_pearson_mantel_df.txt", 
+           sep = "\t", quote = F, row.names = T )
+
+```
+
+
+#peedro chunk
+
+only 1 kingdom at a time
+```{r}
+
+
+ps_to_dist_1kingdom<-ps_to_distance_per_stress_1kingdom(CSS_BacFun_l$Bac)
+
+mantel_df_1kingdom<-distance_per_stress_to_mantel_df_1kingdom(distance_per_stress_1kingdom_output = ps_to_dist_1kingdom, correlation_method = "pearson")
+
+```
+
+
+
+```{r}
+
+mantel.bray <- lapply(ps_to_dist_1kingdom$dist.bray_l, function(x){
+    set.seed(123)
+    vegan::mantel(x, pd, method = "pearson", na.rm=FALSE, permutations=999)
+  })
+  
+  #make df for each element 
+  df.Mantel_Bray <- lapply(mantel.bray, df_Mantel)
+  
+  #merging df 
+  df.Mantel_Bray <- as.data.frame(unlist(df.Mantel_Bray))%>%
+    tibble::rownames_to_column()%>%
+    tidyr::separate(col=rowname,into = c("Treatment", "Community", "metric"),
+                    extra = "merge")%>% #takes everything after first point and puts it together 
+    mutate(distance="Bray")%>% #change this manually for distance 
+    subset(metric!="Treatment") %>%
+    dplyr::rename_with(.cols=4, ~"value")
+  
+  df.Mantel_Bray<-df.Mantel_Bray[,-2]
+  
+  #### Jaccard Ctr=NS, MeJA=Sig, SA=Sig ####
+  mantel.jaccard <- lapply(distance_per_stress_1kingdom_output$dist.jaccard_l, function(x){
+    set.seed(123)
+    vegan::mantel(x, pd, method = correlation_method, na.rm=FALSE, permutations=999)})#Ctr=NS, MeJA=NS, SA=Sig
+  
+```
+

@@ -1,0 +1,13 @@
+Community	Treatment	distance	r2_Mantel	p_value	significant
+1	Bac	Control	Bray	0.092	0.28	No
+2	Bac	MeJA	Bray	0.075	0.327	No
+3	Bac	SA	Bray	0.15	0.18	No
+4	Fun	Control	Bray	-0.008	0.522	No
+5	Fun	MeJA	Bray	0.173	0.054	No
+6	Fun	SA	Bray	0.007	0.504	No
+7	Bac	Control	Jaccard	0.093	0.28	No
+8	Bac	MeJA	Jaccard	0.071	0.335	No
+9	Bac	SA	Jaccard	0.149	0.181	No
+10	Fun	Control	Jaccard	-0.004	0.503	No
+11	Fun	MeJA	Jaccard	0.173	0.056	No
+12	Fun	SA	Jaccard	0.01	0.497	No

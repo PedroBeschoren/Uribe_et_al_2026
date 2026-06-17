@@ -1,0 +1,529 @@
+---
+title: "Plant species information"
+author: "Marcela Aragon"
+date: "24/1/2024"
+output: html_document
+---
+
+#General Settings
+
+let's first set working directory and load packages that we might need
+```{r}
+
+#Set working directory to project directory 
+getwd() #ok
+
+#let's deactivate renv for this script
+renv::deactivate()
+
+#Now load your (global) libraries:
+library(plyr)
+library(knitr)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(ggpubr)
+library(tibble)
+library(readxl)
+library(readr)
+library(ape)
+library(phyloseq)
+
+```
+
+```{r}
+## Settings for plots
+
+# Set axis looks
+theme_set(theme_bw())
+axis_looks <- theme(axis.text.x = element_text(colour = "black", size = 9,
+                                               face = "bold", angle=90, vjust = 0.5, hjust=1))+
+  theme(axis.text.y = element_text(colour = "black", size = 9, face = "bold"))+
+  theme(axis.title=element_text(size=10, face = "bold"))
+
+```
+
+#Get data
+
+I would like to create a df with all the right information per species, including correct name, correct tribe (Kasper's tree), Family experiment code and all of the information that was used to select these species to represent the Brassicaceae family phylogeny. 
+
+Furthermore, I would like to use this information to arrange the df with species_growth and re-create the regressions that were used to classify plants as fast-medium-slow.
+
+The data is scattered, so let's start by gathering all the available data 
+
+```{r}
+
+#1
+#Has the raw data of germination percentage and selection criteria used in 2021, only selected spp for Experiment
+selection_experiment_full <- read_excel("./16_Plant_species_information/data/Family_spp_MegaExcel.xlsx",
+                        sheet = "Selection_criter")
+
+#2
+#Has the raw data of germination percentage and selection criteria used in 2021, all of the species 
+plant_sp_candidates_full <- read_excel("./16_Plant_species_information/data/Family_spp_MegaExcel.xlsx",
+                        sheet = "Rounds_info")
+
+#3
+#Has species full name, species speed, and species abbreviation name
+#this is the same info as the one contained in the original ps_16S object
+phylo_ps <- read_csv("16_Plant_species_information/data/Plant_species_phylogeny_metadata.csv")
+
+#4
+#Has the info from Kasper on plants used for the alignment + phylogenetic tree
+#It contains the most updated names for species
+df_Kasper_tree <- read_excel("./16_Plant_species_information/data/2023-11-16_Brassicaceae_crop_genetic_data_for_MarcelaAG.xlsx")
+
+#5
+#Has all the raw data of rounds of growth 
+growth_speed <- read.csv("./16_Plant_species_information/data/plantgrowth.csv")
+
+#6
+#Final plant phylogeny from Kasper
+Bra_tree <- read.tree("./17_Plant_phylogeny/Results/Supermatrix_Kasper_tree_renamed_rotated_rooted.tre")
+
+#quick look
+plot(Bra_tree, type="phylogram", align.tip.label=TRUE)
+phylo_tips <- rev(Bra_tree$tip.label) #vector with phylogeny order of 22 final species
+
+#7
+#SuperTribe classification of species
+supertribe <- read_excel("./16_Plant_species_information/data/Super_Tribe.xlsx")
+
+#8
+#Has the Final metadata df from ps object
+
+#this will load the CSS-normalized 16S and ITS data as a list of two objects, used for analysis
+#we only need the sample_data info
+load("./Data/phyloseq_objects/CSS_BacFun_rhizoplane_HighFilt_ps_l.RData")
+
+#Get only metadata df
+df_full_ps <- data.frame(sample_data(CSS_BacFun_rhizoplane_HighFilt_ps_l$Bac))
+
+#clean
+rm(CSS_BacFun_rhizoplane_HighFilt_ps_l)
+
+```
+
+## 1. Species taxonomic info
+
+First, make a df with the key names for species name, species abbreviation names,the current correct taxonomic names and super tribe classification
+
+```{r}
+
+#You'll need:
+df_full_ps #sample data from the phyloseq object, this was used to analyze everything.
+df_Kasper_tree #df with accurate and most up to date names of species + phylogenetic tree info
+supertribe #classification of species in SuperTribes
+
+#make small df with the key between full species name, sp abb name and MY presence: 22 species 
+key_for_spp <- df_full_ps %>% 
+               select(Sp_full_name, Sp_abb_name, Sp_Tribe, MY_tree_presence, Speed)%>%
+               distinct(Sp_full_name, Sp_abb_name, Sp_Tribe, MY_tree_presence, Speed)%>% #keep only the unique 
+               tibble::remove_rownames()%>%                                       #combination once.
+               filter(MY_tree_presence=="inside_MY_tree")%>%
+               droplevels()%>%
+               arrange(factor(Sp_abb_name, levels=phylo_tips))
+
+#Now make a single df with accurate phylogenetic tree information
+df_sp_names_complete <- left_join(key_for_spp, df_Kasper_tree, by="Sp_abb_name")
+
+df_sp_names_complete <- df_sp_names_complete %>% 
+                        rename(Species_new_name_correct = Species_name_new)%>%
+                        rename(Species_old_name_correct = Species_name_old)%>% 
+                        rename(Tribe_new_correct = Tribe)%>%
+                        relocate(Sp_abb_name, Sp_full_name, Species_new_name_correct, Tribe_new_correct)
+
+df_sp_names_complete <- left_join(df_sp_names_complete, supertribe, by="Sp_abb_name")
+df_sp_names_complete <- df_sp_names_complete %>% 
+                        relocate(SuperTribe, .after=Tribe_new_correct)
+
+#add "_" to blank spaces in text to avoid errors later
+df_sp_names_complete$Species_new_name_correct <- gsub(" ", "_", df_sp_names_complete$Species_new_name_correct)
+df_sp_names_complete$Species_old_name_correct <- gsub(" ", "_", df_sp_names_complete$Species_old_name_correct)
+df_sp_names_complete$SuperTribe <- gsub(" ", "_", df_sp_names_complete$SuperTribe)
+
+#save it
+#write.csv(df_sp_names_complete, #"./16_Plant_species_information/data/df_sp_names_complete_clean.csv", row.names=FALSE)
+
+```
+
+## 2. Selection criteria info
+
+Now, get extra info of selected species 
+ 
+```{r}
+
+#You'll need:
+plant_sp_candidates_full #df with everything, not cleaned but useful to document process of selection
+selection_experiment_full #df with final species selection, get info from here 
+
+##Process of species selection
+
+#Arrange df's
+plant_sp_candidates_full <- plant_sp_candidates_full[,c(2:12)] #keep only necessary columns
+colnames(plant_sp_candidates_full)[3] <- "Species"
+
+#how many species/accessions were planned to be tested?
+unique(plant_sp_candidates_full$Species) #53
+
+#from those, how many were actually tested?
+plant_sp_candidates_full <- plant_sp_candidates_full %>% drop_na(Germinated) #47 
+
+#from those, how many did not germinate in MiCRop soil?
+plant_sp_candidates_full %>% dplyr::count(Germinated) #13, leaving 34 to choose from 
+plant_sp_candidates_full <- plant_sp_candidates_full %>% filter(Germinated=="yes")
+
+#how fast were these 34 species growing?
+plant_sp_candidates_full %>% dplyr::count(Speed) #more or less distributed equally between F,M and S*
+
+
+# *See 2.DF with species speed to check how speed/phenology was calculated
+
+## Germination information
+
+#Then, the 34 "semi-finalist" species (selection df) were selected based on (1)speed of growth,
+#(2)Lineage-Tribe distribution, (3)Germination success and how easy it was to Dip(4)
+#we want to document this in a single plot, for this I need to first clean the df 
+
+selection_experiment_full %>% dplyr::count(Family) #Let's see how many per Family we had in the experiment
+
+#Add sp_abb column to make it easier to select
+#arrange names
+selection_experiment <- selection_experiment_full %>%
+                    filter(Family=="Brassicaceae")%>% #keep only the Brass family
+                    dplyr::rename(Sp_full_name=Species)%>%#to merge later
+                    filter(!(Sp_full_name == "Brassica oleraceae" & `Growth speed` %in% c("Fast", "Slow")))
+                           
+selection_experiment$Sp_full_name <- gsub(" ", "_", selection_experiment$Sp_full_name)
+
+#correctnames
+library(plyr)
+selection_experiment$Sp_full_name
+selection_experiment <- transform(selection_experiment, Sp_full_name=revalue(Sp_full_name,
+                                  c("Euclidium_syriacum"="Euclydium_syriacum",
+                                    "Brassica_oleraceae"="Brassica_oleraceae_Rivera_Medium",
+                                    "Camelina_sativa_crop"="Camelina_sativa", #we used the crop Cas
+                                    "Camelina_sativa"="Camelina_sativa_wild",
+                                    "Arabis_glabra"="Turritis_glabra",
+                                    "Descurainia_sophia"="Descurainia_sophiades")))
+#merge df's
+selection_experiment <- left_join(selection_experiment, key_for_spp, by="Sp_full_name") %>%
+                        relocate(Sp_full_name, Sp_abb_name, MY_tree_presence)%>%
+                        dplyr::filter(MY_tree_presence=="inside_MY_tree")%>%
+                        mutate(as.factor(Sp_abb_name))
+
+#quick check
+table(selection_experiment$Sp_abb_name)
+table(key_for_spp$Sp_abb_name) #ok!
+
+#make it into factors/numeric
+selection_experiment <- selection_experiment %>% 
+                        select(-c(Total, 'Per speed'))%>%
+                        dplyr::relocate(Germination, .after=last_col())
+
+selection_experiment[,1:15] <- lapply(selection_experiment[,1:15], factor)
+selection_experiment$Germination <- as.numeric(as.character(selection_experiment$Germination))
+
+str(selection_experiment)
+
+selection_criteria <- selection_experiment #change name so its more informative
+
+#clean
+#rm(selection_experiment)
+
+```
+
+## 3. Growth rate 
+
+
+```{r}
+
+#In here there's all the data for plant growth (number of true leaves vs days after sowing)
+plantgrowth <- growth_speed
+
+#let's select only those 22 species of interest
+unique(plantgrowth$species) #43 species
+
+#filtering
+#Keeping only those that were fertilized with hoagland==1 and controls (so, not treated with MeJA as a pilot)
+plantgrowth_selection <- plantgrowth %>% 
+                         dplyr::rename(Sp_full_name = species)%>%
+                         #filter(!hoagland == 3 & !hoagland == 2 & !hoagland == 0)%>% #removes test with Hoagland
+                         filter(treated == "control") %>%
+                         filter(!lineage == "Cucurbitaceae" & !lineage =="Fabaceae" 
+                 & !lineage == "Poaceae" & !lineage =="Solanaceae")%>%
+                         select(-c(concentration, dipped, tribe, lineage, hoagland, treated))%>% #not needed
+                         droplevels()
+
+#numbers are characters, so have to change it to number
+plantgrowth_selection[,c(4:39)] <-lapply(plantgrowth_selection[,c(4:39)], as.numeric)
+table(plantgrowth_selection$Sp_full_name, plantgrowth_selection$round) 
+
+#separating X_DAS to a column with number and another column with value of leaves (making it long format)
+long <-plantgrowth_selection %>%
+    pivot_longer(
+    cols = ends_with("das"), 
+    names_to = "DAS",
+    values_to = "number_of_true_leaves",
+    values_drop_na = TRUE) #removes NA's
+
+long$DAS <- gsub("X", "", long$DAS) #remove X from DAS
+long$DAS <- gsub("_das", "", long$DAS) #remove _das from DAS
+long[,c(4:5)] <-lapply(long[,c(4:5)], as.numeric)
+long[,c(1:3)]<-lapply(long[,c(1:3)], as.factor)
+
+#correct species name
+long <- transform(long, Sp_full_name=revalue(Sp_full_name,
+                                  c("Euclidium_syriacum"="Euclydium_syriacum",
+                                    "Brassica_oleracea_rivera"="Brassica_oleraceae_Rivera_Medium",
+                                    "Camelina_sativa_crop"="Camelina_sativa", #we used the crop Cas
+                                    "Camelina_sativa"="Camelina_sativa_wild",
+                                    "Arabis_glabra"="Turritis_glabra")))
+
+
+#now, select only those present in the MY tree
+#Before that, let's fix the name in the key for spp from Descurainia sophiades to Descurainia sophia 
+key_for_spp <- key_for_spp %>%
+  mutate(Sp_full_name = if_else(Sp_full_name == "Descurainia_sophiades", 
+                                "Descurainia_sophia", 
+                                Sp_full_name))
+
+#merge df's
+long_selection <- left_join(long, key_for_spp, by="Sp_full_name") %>%
+                        relocate(Sp_full_name, Sp_abb_name, MY_tree_presence)%>%
+                        dplyr::filter(MY_tree_presence=="inside_MY_tree")%>%
+                        mutate(as.factor(Sp_abb_name))%>%
+                        select(-c(Sp_Tribe, MY_tree_presence))
+
+#quick check
+table(long_selection$Sp_abb_name)
+unique(long_selection$Sp_abb_name)
+table(key_for_spp$Sp_abb_name) #ok!
+table(long_selection$round)
+
+#I want to know if some species were repeated in more rounds
+table(long_selection$Sp_abb_name, long_selection$round) #some are repeated, let's select 1 round
+
+#filter more
+long_selection2 <- long_selection %>% 
+                   filter(!(round == "2" & Sp_abb_name == "Br"))%>%
+                   filter(!(round == "8" & Sp_abb_name == "Sar"))%>%
+                   filter(!(round == "8" & Sp_abb_name == "Tg"))%>%
+                   filter(!(round == "2" & Sp_abb_name == "Bi"))%>%
+                   filter(!(round %in% c("1", "2", "3", "5", "7", "8") & Sp_abb_name == "Bo_M"))
+                  
+                   
+table(long_selection2$Sp_abb_name, long_selection2$round)
+
+
+detach(package:plyr) #need to unload plyr, otherwise dplyr::summarise doesn't work
+#Now, let's make a summary table to plot it
+
+long_summary <- long_selection2 %>% 
+                dplyr::group_by(Sp_abb_name, ID)%>% #I cluster your data per species
+                filter(number_of_true_leaves %in% 2.5:5.5) %>% #Retain only the observations with 3 to 5 leaves 
+                summarise(Average_days = mean(DAS),
+                          SD = sd(DAS),
+                          Min_days = min(DAS),
+                          Max_days = max(DAS))
+
+#Now get the mean of summary functions by species 
+growth_perSp <- long_summary%>% 
+                      select(-ID)%>% 
+                      dplyr::group_by(Sp_abb_name)%>%
+                      summarise_all(mean, na.rm = TRUE)%>%
+                      as.data.frame()
+
+str(growth_perSp)#ok! 
+
+```
+
+#Plot
+
+```{r}
+
+#Finally, make a single df and plot it
+df_sp_names_complete
+growth_perSp
+selection_criteria
+
+#let's remove those columns that are repeated from selection_criteria
+selection_criteria2 <- selection_criteria %>% 
+                      select(-c("MY_tree_presence", "Sp_Tribe", "Speed", "as.factor(Sp_abb_name)","Growth speed"))
+
+#join df's
+df_plant_sp_full <- left_join(df_sp_names_complete, growth_perSp, by="Sp_abb_name")
+df_plant_sp_full <- left_join(df_plant_sp_full, selection_criteria2, by="Sp_abb_name")
+
+str(df_plant_sp_full) #check
+
+#move columns around
+df_plant_sp_full <- df_plant_sp_full %>% 
+                     relocate(Germination, .after=Species_old_name_correct)%>%
+                     relocate(c(Sp_Tribe,MY_tree_presence,Species_old_name_correct),
+                              .after=last_col()) %>% 
+                     relocate(c(Family,Lineage, Tribe,Sample,`Sampling comment`,
+                                `Taxonomic comment`),
+                              .after=last_col())
+
+df_plant_sp_full[,c(1:6)] <- lapply(df_plant_sp_full[,c(1:6)], as.factor)
+df_plant_sp_full$Sp_abb_name <- factor(df_plant_sp_full$Sp_abb_name, levels=phylo_tips)
+
+#done!
+#save
+#save it as Rdata and csv
+saveRDS(df_plant_sp_full, "./16_Plant_species_information/data/df_full_sp_info_clean.rds")
+write.csv(df_plant_sp_full, "./16_Plant_species_information/data/df_full_sp_info_clean.csv", row.names=FALSE)
+
+```
+
+
+```{r}
+
+#1. Germination rates 
+germination <- ggplot(df_plant_sp_full, aes(x=Sp_abb_name, y=Germination*100))+
+        geom_bar(stat='identity', fill="black")+
+        axis_looks+
+        ylab("Germination %")+
+        theme(aspect.ratio=1/4)+
+        theme(axis.title.x = element_blank(), axis.text.x = element_blank())
+        #scale_x_discrete(limits = rev(levels(df_plant_sp_full$Sp_abb_name)))+ #reversing order
+        #coord_flip()
+
+#2. Growth speed
+growthspeed <- ggplot(df_plant_sp_full, aes(x=Sp_abb_name, y = Average_days, colour=Speed)) +
+  geom_point(size=3) + 
+  geom_linerange(aes(ymin = Average_days - SD, ymax = Average_days + SD, colour=Speed), size=1)+
+  scale_color_manual(values=c("chartreuse4", "gold2", "red4"))+
+  ylab("Average days to 3:5 leaves stage")+
+  axis_looks+
+  #scale_x_discrete(limits = rev(levels(df_plant_sp_full$Sp_abb_name)))+ #reversing order
+  #coord_flip()+
+  geom_hline(yintercept = 15, linetype ="dashed", size = 0.8, color = "chartreuse4")+
+  geom_hline(yintercept = 20, linetype ="dashed", size = 0.8, color = "gold2")+
+  geom_hline(yintercept = 23, linetype ="dashed", size = 0.8, color = "red4")+
+  theme(aspect.ratio=1/3)+
+  theme(axis.title.x = element_blank(), axis.text.x = element_blank())
+
+#3. Wild vs Cultivated
+temp <- df_plant_sp_full %>%  mutate(category="1")
+colnames(temp)
+
+
+wild_cultivated <- ggplot(temp, aes(x=Sp_abb_name, y = category, fill=`Wild/ Cultivated`)) +
+  geom_point(size=5, shape=21) + 
+  #geom_linerange(aes(ymin = Average_days - SD, ymax = Average_days + SD, colour=Speed), size=1)+
+  scale_fill_manual(values=c("black", "white"))+
+  ylab("Wild/Cultivated")+
+  axis_looks+
+  theme(aspect.ratio=1/6)+
+  theme(axis.title.x = element_blank(), axis.text.x = element_blank())
+  #scale_x_discrete(limits = rev(levels(df_plant_sp_full$Sp_abb_name)))+ #reversing order
+  #coord_flip()
+
+#---- 4. Tribe [Not used] ----
+library(RColorBrewer)
+display.brewer.all()
+
+colourCount<-length(unique(temp$Tribe_new_correct))
+getPalette <- colorRampPalette(brewer.pal(16, "Dark2"))
+
+tribe <- ggplot(temp, aes(x=Sp_abb_name, y = category, fill=Tribe_new_correct)) +
+  geom_point(size=5, shape=21) + 
+  #geom_linerange(aes(ymin = Average_days - SD, ymax = Average_days + SD, colour=Speed), size=1)+
+  scale_fill_manual(values=getPalette(colourCount))+
+  ylab("Tribe")+
+  axis_looks+
+  theme(aspect.ratio=1/6)
+
+#not super clear, many colors
+
+#4.1 Lineage [Not used]
+colourCount<-length(unique(temp$Lineage))
+getPalette <- colorRampPalette(brewer.pal(4, "Set1"))
+
+lineage <- ggplot(temp, aes(x=Sp_abb_name, y = category, fill=Lineage)) +
+  geom_point(size=5, shape=21) + 
+  #geom_linerange(aes(ymin = Average_days - SD, ymax = Average_days + SD, colour=Speed), size=1)+
+  scale_fill_manual(values=getPalette(colourCount))+
+  ylab("Lineage")+
+  axis_looks+
+  theme(aspect.ratio=1/6)
+
+#----
+
+#5. SuperTribe
+unique(temp[,c('SuperTribe','Color_HEX')])
+
+colors <- c("Camelinodae_(I)"="#de70a8", #same colors as BrassiTol
+            "Arabodae_(IV)"="#9474e1",
+            "Hesperodae_(III)"="#5ab2eb",
+            "Brassicodae_(II)"="#10a072",
+            "Unplaced"="#e99c00",
+            "Heliophilodae_(V)"="#e05a00")
+
+Supertribe <- ggplot(temp, aes(x=Sp_abb_name, y = category, fill=SuperTribe)) +
+  geom_point(size=5, shape=21) + 
+  #geom_linerange(aes(ymin = Average_days - SD, ymax = Average_days + SD, colour=Speed), size=1)+
+  scale_fill_manual(values=colors)+
+  ylab("Super Tribe")+
+  axis_looks+
+  theme(aspect.ratio=1/6)
+
+
+# Combine the plots with patchwork
+library(patchwork)
+
+#only with Supetribe
+wild_cultivated/growthspeed/germination/Supertribe 
+
+ggsave("plot_full_species_info_noPhylo.pdf",
+       path = "./16_Plant_species_information/results/",
+        width = 2200, height = 3000 , units = "px", dpi=300, scale=0.9) #Supplementary Fig X
+
+```
+
+#Table
+
+Finally, let's make a table with the right information
+```{r}
+
+colnames(df_plant_sp_full)
+df_plant_sp_full 
+
+#I need another column: "Data_from/Reference:" 
+#We need a table with species abb code, species name (correct), tribe and lineage + sample code
+table <- df_plant_sp_full %>% 
+                    select(Sp_abb_name, Species_new_name_correct,
+                           Lineage, Tribe_new_correct, Sample, `Sampling comment`)
+
+table <- table %>% 
+          mutate(Data_from=
+                   case_when(
+                     grepl("Nikolov", `Sampling comment`) ~ "Nikolov et al., (2019)",
+                     grepl("Elena", `Sampling comment`) ~ "Castillo-Lorenzo, unpublished data",
+                     TRUE ~ "Hendriks et al., (2023)"))
+
+table$Species_new_name_correct <- gsub("_", " ", table$Species_new_name_correct)
+
+library(plyr)
+table <- transform(table, Lineage=revalue(Lineage,
+                                  c("Expanded Lineage 2"="Exp. Lineage II",
+                                    "Lineage 1"="Lineage I",
+                                    "Lineage 2"="Lineage II",
+                                    "Lineage 3"="Lineage III")))
+
+table <- table %>%  select(-Sampling.comment)
+colnames(table) <- c("Species code", "Species name", "Lineage", "Tribe", "NCBI SRA", "Data from:" )
+
+library(rempsyc)
+table2 <- nice_table(table,
+              title = c("Phylogenetic information of Brassicaceae plant species"),
+              note = "NCBI SRA is for now a tentative code")
+
+flextable::save_as_docx(table2, path = "./16_Plant_species_information/results/Table_full_species_info.docx")
+
+```
+
+

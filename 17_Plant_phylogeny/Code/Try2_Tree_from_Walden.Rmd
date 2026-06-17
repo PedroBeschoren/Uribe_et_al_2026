@@ -1,0 +1,493 @@
+---
+title: "Brassicaceae phylogenetic tree from Walden et al., 2020"
+author: "Marcela Aragon"
+date: "3/9/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Overview
+
+An alternative to reconstructing our own Brassicaceae phylogeny based on ITS+matK+rbcL gene data from GeneBank is to use a resolved phylogeny for the Brassicaceae family as a reference and prune it to keep only those species within our experiment (or the most closely related species available). This approach has the advantage of using a well-supported phylogeny in which evolutionary relationships among species are reliable (at least at the tribe-lineage level), and that has already been peer-reviewed and accepted.
+
+Recently, a **plastome-based** Brassicaceae phylogeny was reconstructed by Nora Walden and collaborators \[Walden *et al*., 2020. Nested whole-genome duplications coincide with diversification and high morphological disparity in Brassicaceae. *Nature Communications*\] (<https://www.nature.com/articles/s41467-020-17605-7>). To have a good representation of the 51 tribes within the Brassicaceae family, they included **176 species** (153 genera out of 351 total genera) and used full chloroplast-genome data (previously available and also *de novo* sequenced and annotated). They kept only coding regions and made a final selection of **60 genes** (43 protein-coding, 14 tRNAs and 3rRNAs) that were both annotated and present in all of the species. From this alignment (29,126 bp with 12,187 variable sites) they determined a single partition with a GTR + G + I + X substitution model using ParitionFinder 2.1.1. The tree was reconstructed using unpartitioned maximum likelihood with a rapid bootstrap analysis using 1000 replicates to search for the best scoring tree under the substitution model selected in RAxML 8.1.16. Furthermore, they **estimated divergence time** of the tree in Millions of years (Mya) using four fossil calibration points and 28-independent MCMC runs with 100,000,000 generations each.
+
+The Walden *et al*., 2020 phylogeny was thouroughly compared with the most recently published phylogenies \[\^1\] reaching the conclusion that was "the most available maternal perspective on the Brassicaceae evolutionary history" as they made sure to 1. Include representatives for the full Brassicales order to time-calibrate it (not just the Brassicaceae family), 2. Use plastome data to follow-up the maternal line and 3. More species to cover all the tribes within Brassicaceae (trying to have at least 3 species/tribe).
+
+Therefore, if the Walden *et al*., 2020 phylogeny is included in our study we can be certain that we are using the most up to date Brassicaceae phylogeny that has a congruent, time-resolved and highly-supported evolutionary history. As one of the main goals for us is to answer whether there is a phylogenetic signal for microbiome recruitment under *(biotic*) stress in the Brassicaceae family, using the right placement of our species within the tree is paramount.
+
+\[\^1\] list of links/references for papers of other phylogenies: Huang et al., 20XX, Nikolov et al., 20XX.
+
+## Status of our species within the Walden *et al*., 2020 phylogeny
+
+From the 23+1 species included in our study 19 are included in the phylogeny (Table 1):
+
+-   12 are included as the same species
+
+-   5 are included with the same genus but with different species, all of them representatives of different tribes
+
+-   2 are included with different genus but representing the different tribes (*B. vulgaris* & *B. incana*)
+
+5 are not included: *B. oleracea* K, *B. oleracea* R*, D. tenuifolia, H. incana* & *S. alba* (Table 1). From which:
+
+-   *D. tenuifolia* & *H. incana* have estimated divergence time information available in another phylogeny reconstructed by the same author with similar methods \[\^2\]
+
+-   *B. oleracea* (the clade of the species in general, not by particular varieties) has estimated divergence time information available in another plastome-based phylogeny that used Walden's tree (2015) to calibrate time. \[\^2\]
+
+-   There is no time divergence information available for *S. alba,* and the genus is not monophyletic, which makes it difficult to place it in the phylogeny with reliability. \[\^2\]
+
++-----------+------------------+--------------------------+------------------------+----------------------------------------+------------------------------------------+------------------------------------------------------------------------------------------------------------------------------+
+| **#taxa** | **Species_code** | **Species_name**         | **Tribe (BrassiBase)** | **Walden et al., 2020. Same species?** | **Divergence time available elsewhere?** | **Notes**                                                                                                                    |
++:=========:+:================:+:========================:+========================+:======================================:+:========================================:+==============================================================================================================================+
+| 1         | M4               | *Arabidopsis lyrata*     | Camelinae              | 1                                      |                                          |                                                                                                                              |
++-----------+------------------+--------------------------+------------------------+----------------------------------------+------------------------------------------+------------------------------------------------------------------------------------------------------------------------------+
+| 2         | F4               | *Arabidopsis thaliana*   | Camelinae              | 1                                      |                                          |                                                                                                                              |
++-----------+------------------+--------------------------+------------------------+----------------------------------------+------------------------------------------+------------------------------------------------------------------------------------------------------------------------------+
+| 3         | M7               | *Turritis glabra*        | Turritidae             | 1                                      |                                          |                                                                                                                              |
++-----------+------------------+--------------------------+------------------------+----------------------------------------+------------------------------------------+------------------------------------------------------------------------------------------------------------------------------+
+| 4         | F6               | *Barbarea vulgaris*      | Cardamineae            | Rorippa islandica                      |                                          | No Barbarea species included but Rorippa genus is the closest within Cardamineae tribe (Patsiou et al., 2020)                |
++-----------+------------------+--------------------------+------------------------+----------------------------------------+------------------------------------------+------------------------------------------------------------------------------------------------------------------------------+
+| 5         | F10              | *Berteroa incana*        | Alysseae               | Aurinia corymbosa                      |                                          | No Berteroa species included but Aurinia corymbosa is the closest within Alysseae tribe (Patsiou et al., 2020)               |
++-----------+------------------+--------------------------+------------------------+----------------------------------------+------------------------------------------+------------------------------------------------------------------------------------------------------------------------------+
+| 6         | M8               | *Brassica nigra*         | Brassiceae             | 1                                      |                                          |                                                                                                                              |
++-----------+------------------+--------------------------+------------------------+----------------------------------------+------------------------------------------+------------------------------------------------------------------------------------------------------------------------------+
+| 7         | S9               | *Brassica oleraceae_K*   | Brassiceae             | NA                                     | yes                                      | Divergence time of 2.18 Mya with B. rapa using chloroplast genome and same time-calibration as Walden (Li et al., 2017)      |
++-----------+------------------+--------------------------+------------------------+----------------------------------------+------------------------------------------+------------------------------------------------------------------------------------------------------------------------------+
+| 8         | S1               | *Brassica oleraceae_R*   | Brassiceae             | NA                                     | ?                                        |                                                                                                                              |
++-----------+------------------+--------------------------+------------------------+----------------------------------------+------------------------------------------+------------------------------------------------------------------------------------------------------------------------------+
+| 9         | M9               | *Brassica rapa*          | Brassiceae             | 1                                      |                                          |                                                                                                                              |
++-----------+------------------+--------------------------+------------------------+----------------------------------------+------------------------------------------+------------------------------------------------------------------------------------------------------------------------------+
+| 10        | M6               | *Camelina sativa*        | Camelinae              | 1                                      |                                          |                                                                                                                              |
++-----------+------------------+--------------------------+------------------------+----------------------------------------+------------------------------------------+------------------------------------------------------------------------------------------------------------------------------+
+| 11        | S7               | *Cochlearia officinalis* | Cochlearieae           | C. pyrenaica                           |                                          | Same genus but other species within Cochlearieae tribe                                                                       |
++-----------+------------------+--------------------------+------------------------+----------------------------------------+------------------------------------------+------------------------------------------------------------------------------------------------------------------------------+
+| 12        | M5               | *Descurainia sophiades*  | Descurainieae          | D. sophia                              |                                          | Same genus but other species within Descurainieae tribe                                                                      |
++-----------+------------------+--------------------------+------------------------+----------------------------------------+------------------------------------------+------------------------------------------------------------------------------------------------------------------------------+
+| 13        | S11              | *Diplotaxis tenuifolia*  | Brassiceae             | NA                                     | yes                                      | Divergence time of 6.47 Mya with B. napus/B. rapa branch using similar methods as in Walden, 2020 (Patsiou et al., 2020)     |
++-----------+------------------+--------------------------+------------------------+----------------------------------------+------------------------------------------+------------------------------------------------------------------------------------------------------------------------------+
+| 14        | F5               | *Erysimum cheirantoides* | Erysimae               | E. bicolor                             |                                          | Same genus but other species within Erysimae tribe                                                                           |
++-----------+------------------+--------------------------+------------------------+----------------------------------------+------------------------------------------+------------------------------------------------------------------------------------------------------------------------------+
+| 15        | F11              | *Euclidium syriacum*     | Euclidieae             | 1                                      |                                          |                                                                                                                              |
++-----------+------------------+--------------------------+------------------------+----------------------------------------+------------------------------------------+------------------------------------------------------------------------------------------------------------------------------+
+| 16        | S5               | *Hirschfeldia incana*    | Brassiceae             | NA                                     | yes                                      | Divergence time of 5.94 Mya with B. nigra/S. arvensis branch using similar methods as in Walden, 2020 (Patsiou et al., 2020) |
++-----------+------------------+--------------------------+------------------------+----------------------------------------+------------------------------------------+------------------------------------------------------------------------------------------------------------------------------+
+| 17        | S6               | *Iberis amara*           | Iberideae              | 1                                      |                                          |                                                                                                                              |
++-----------+------------------+--------------------------+------------------------+----------------------------------------+------------------------------------------+------------------------------------------------------------------------------------------------------------------------------+
+| 18        | S8               | *Isatis tinctoria*       | Isatidae               | 1                                      |                                          |                                                                                                                              |
++-----------+------------------+--------------------------+------------------------+----------------------------------------+------------------------------------------+------------------------------------------------------------------------------------------------------------------------------+
+| 19        | F8               | *Lepidium ruderale*      | Lepidieae              | L. sativum                             |                                          | Same genus but other species within Lepidieae tribe                                                                          |
++-----------+------------------+--------------------------+------------------------+----------------------------------------+------------------------------------------+------------------------------------------------------------------------------------------------------------------------------+
+| 20        | F9               | *Lobularia maritima*     | Anastaticeae           | 1                                      |                                          |                                                                                                                              |
++-----------+------------------+--------------------------+------------------------+----------------------------------------+------------------------------------------+------------------------------------------------------------------------------------------------------------------------------+
+| 21        | F7               | *Malcolmia maritima*     | Malcolmieae            | 1                                      |                                          |                                                                                                                              |
++-----------+------------------+--------------------------+------------------------+----------------------------------------+------------------------------------------+------------------------------------------------------------------------------------------------------------------------------+
+| 22        | M10              | *Sinapis alba*           | Brassiceae             | NA                                     | no                                       | Sinapis genus is not monophyletic\*                                                                                          |
++-----------+------------------+--------------------------+------------------------+----------------------------------------+------------------------------------------+------------------------------------------------------------------------------------------------------------------------------+
+| 23        | S10              | *Sinapis arvensis*       | Brassiceae             | 1                                      |                                          |                                                                                                                              |
++-----------+------------------+--------------------------+------------------------+----------------------------------------+------------------------------------------+------------------------------------------------------------------------------------------------------------------------------+
+| 24        | M11              | *Sysimbrium irio*        | Sisymbrieae            | S. officinale                          |                                          | Same genus but other species within Sisymbriae tribe                                                                         |
++-----------+------------------+--------------------------+------------------------+----------------------------------------+------------------------------------------+------------------------------------------------------------------------------------------------------------------------------+
+| 25        | outgroup         | *Aethionema arabicum*    | outgroup               | 1                                      |                                          |                                                                                                                              |
++-----------+------------------+--------------------------+------------------------+----------------------------------------+------------------------------------------+------------------------------------------------------------------------------------------------------------------------------+
+
+: Table 1. List of Brassicaceae species included in our study and present (or not) in the Walden et al., 2020 phylogeny. \[add here full references for Li et al., 2017 and Patsiou et al., 2020\]
+
+Thus, from our current list the only species that is not represented is *S. alba,* part of the Brassicacea tribe from which we already have 6 other representative species. The chloroplast genomes for both *B. oleracea* (wild) and *S. alba* are available and annotated in GeneBank under accession numbers NC_041167.1 and NC_045948.1, respectively. However, the full chloroplast genome for the Rivera cultivar (nor the Kimmeridge, for that matter) is not available or at least not present in the GeneBank database (as far as I know).
+
+As reconstructing the phylogeny from scratch using full plastome-data (or at least the same 60 genes) would require an extensive amount of time (i.e. running the ML tree in Beast takes about 2 weeks to render only) and a high degree of technical expertise that nobody in the team currently has, the best approach in this moment is to use the Walden *et al*., 2020 phylogeny as a reference, prune the tree to keep only the species in our study (or the most closely related available ones), add by hand the 3 species from which divergence time is available \[\^2\] and leave out *S. alba* for now.
+
+Later on we could compare Nora's tree vs our ITS+rbcL+matK reconstructed tree using our microbiome data to check whether the tree topology has an influence on the phylogenetic signal of microbiome recruitment/diversity/differential abundance.
+
+***Question for discussion in next Microp meeting:**\
+Considering that we have two "varieties" from the same species for B. oleracea, how were we thinking on differentiating them? (besides from phenotype).*
+
+*If we use ITS (or other genes) data retrieved from GeneBank it would be the same situation as there are no specific entries for Rivera and/or Kimmeridge, currently we are using two arbitrary (ITS+rbcL+matK) sequences just based on whether the title included the word "wild" or "cultivar".*
+
+\[\^2\] Nora Walden, *personal communication*
+
+# 1. Pruning the Walden *et al*., 2020 phylogeny
+
+## 1.1. Setting R Studio
+
+```{r echo=T, error=T, message=F, include=F}
+# Session --> Set working directory --> To Project Directory
+
+# Load libraries 
+library("ape") #handles phylogenetic objects
+library("TreeTools")
+library("tidytree")
+library("lattice")
+library("phangorn") #UPGMA & NJ
+library("ade4")
+library("distory") #to compare trees
+library("geiger")
+library("phytools") 
+library("stats") #cophenetic distances 
+```
+
+## 1.2. Exploring tree
+
+```{r echo=T, error=T, message=FALSE}
+# Open Nexus tree from Walden et al.,2021. NatureCommunications
+Nora_tree <- read.nexus("./Data/SupplementaryDataSet7_PlastomeBEAST.tre")
+Nora_tree
+
+# summary information from the phylo object
+class(Nora_tree)
+summary.phylo(Nora_tree) # this tree contains 316 taxa, we need to prune it to 24 only
+#plot(Nora_tree) #too big to see it
+
+```
+
+Now you have the tree loaded from a nexus file into R as a phylo object, it works similarly as a phyloseq object as you have different data frames inside that you can access with the `$ + tab` after the name.
+
+For example:
+
+```{r echo=F, error=T, message=F, include=F}
+# getting more information from the phylo object
+is.rooted(Nora_tree) #check that this tree is rooted 
+Nora_tree$edge.length #gives back all branch lengths in millions of years.
+Nora_tree$tip.label #gives back names of tips (species names), this is a matrix
+```
+
+(output not included because the list is quite long)
+
+## 1.3. Selecting species to keep
+
+In the phylo tree each tip (species/taxa) has a given number, to get a list of all the tips and their number you convert the `tip.label` information into a dataframe and save it as a .csv to be able to open it and manipulate it in excel.
+
+In this df a column "`keep`" was added in which a "1" was placed by hand in case it was the species selected to stay in our tree. Other columns were added to specify species identity in our experiment.
+
+```{r echo=T, error=T, message=F, include=T}
+# making dataframe of tip.label species with tip number and species name
+species_labels_df <- as.data.frame(Nora_tree$tip.label) 
+head(species_labels_df)
+
+# saved csv to modify it in excel
+# write.csv(species_labels_df, "./Data/species_labels_df.csv")
+
+# open modified csv
+species_labels_df <- read.csv("./Data/species_labels_df2.csv")
+head(species_labels_df)
+
+# get back row numbers (tip numbers) of those species to keep
+which(species_labels_df$keep == 1)
+
+# count how many were selected
+length(which(species_labels_df$keep == 1)) #keeping 20 species 
+
+# return df with those selected
+species_labels_df[which(species_labels_df$keep == 1),] 
+
+# Making an object with the selected species
+selected_species <- which(species_labels_df$keep == 1)
+
+# Now you have the tip label numbers of those species to keep in the tree and you proceed to prune it
+
+```
+
+-There must be a way of doing it in R but this was a more straight-forward solution for my current knowledge.-
+
+## 1.4. Pruning the tree
+
+We keep the 20 species that we selected before, explore the new tree and save it as a new .tre file.
+
+```{r echo=T, error=T, message=F, include=T}
+
+# removing all those but the selected species from Nora's tree and making a new phylo tree
+pruned_tree <- drop.tip(Nora_tree, Nora_tree$tip.label[-selected_species]) 
+summary.phylo(pruned_tree) #checking that has 20 taxa and contains branch lengths
+
+# plotting the tree
+plot(pruned_tree)
+axisPhylo() # adding full scale in million years
+#add.scale.bar(length = 10) # or just adding 10 million years scale bar 
+
+# getting information of the new tree
+is.rooted(pruned_tree) #check that this tree is rooted 
+pruned_tree$edge.length #gives back all branch lengths in millions of years.
+pruned_tree$tip.label #gives back names of tips (species names), this is a matrix
+is.ultrametric(pruned_tree) #it's not (also not the full tree)
+
+# saving tree
+write.tree(pruned_tree, file = "./Results/pruned_tree.tre")
+```
+
+Now the tree starts to look very close to what we want and we explore it a bit more and compare with previous tree. Check median values for branch length information, it doesn't seem to deviate largely from the full tree, except for the 3rd quantile that its smaller in the pruned_tree but this is to be expected as the larger, older branches were removed.\
+
+```{r echo=T, error=T, message=F, include=T}
+
+# comparing prunned tree vs full tree
+summary.phylo(pruned_tree)
+summary.phylo(Nora_tree)
+```
+
+# 2. Adding non-included species by divergence time
+
+First, we visualize the `pruned_tree.tre` in FigTree to add divergence time in nodes (Fig. 1).
+
+![Figure 1. Pruned_tree.tre from FigTree](./Figures/pruned_tree.tre.png "Figure 1. Pruned_tree.tre from FigTree")
+
+As we will use the divergence times for *H. incana* and *D. tenuifolia* obtained from Patsiou, Walden & Willi,, 2015, we also visualize that tree here (Figure 2).
+
+[![Figure 2. Phylogenetic tree scaled to estimated divergence times (in million before present, Ma). The numbers near nodes are the estimated divergence times, and the velvet bars indicate their confidence intervals. Copied from Patsiou, Walden & Willi,, 2015.](Figures/Patsiou,Walden&Willi,2015.Time_resolved_Tree_Supplementary.png "Phylogenetic tree as in Fig. S2.2 scaled to estimated divergence times (in million before present, Ma).")](https://onlinelibrary-wiley-com.ezproxy.library.wur.nl/doi/full/10.1111/geb.13280)
+
+And finally, we visualize the time-resolved tree from Li *et al.*, 2017 for *Brassica* (Figure 3)
+
+![Figure 3. Brassica chronogram inferred using BEAST program from sequence alignment of chloroplast genomes. Copied from Li et al., 2017.](Figures/Lietal.,2017.Brassica_chronogram.PNG)
+
+## 2.1 Using bind.tip()
+
+We start with *H. incana* that has a divergence time of 5.94 Mya with the branch of *S. arvensis* and *B. nigra* (Fig. 2).
+
+The `edge.length` in this case is the divergence time of 5.94 Mya and the `position=3.560341797` is the difference between 5.94 and the 2.3797 Mya branch length of *S. arvensis* and *B. nigra* clade in the pruned_tree (Fig. 1)
+
+```{r echo=T, error=T, message=F, include=T}
+
+# binding Hirschfeldia incana to S. arvensis and B. nigra node by divergence time of 5.94 Mya 
+
+node_Hirschfeldia <- getMRCA(pruned_tree, tip = c("NC_035303.1_Sinapis_arvensis", "NC_030450.1_Brassica_nigra")) #selecting node
+
+tree_w_Hirschfeldia <- phytools::bind.tip(pruned_tree, tip.label="Hirschfeldia_incana", where=node_Hirschfeldia, position = 3.560341797, edge.length = 5.94) 
+
+plot(tree_w_Hirschfeldia)
+summary.phylo(tree_w_Hirschfeldia)
+```
+
+# 3. Adding non-included species by divergence time manually on Nexus file
+
+
+#OLD SCRIPT pruning_tree.R
+```{r}
+# Set working directory
+
+#---- 1. Pruning tree ----
+# Open Nexus tree from Walden et al.,2021. NatureCommunications
+
+Nora_tree <- read.nexus("./Data/SupplementaryDataSet7_PlastomeBEAST.tre")
+
+# getting information from the phylo object
+summary.phylo(Nora_tree) # this tree contains 316 taxa, we need to prune it to 24 only
+is.rooted(Nora_tree) #check that this tree is rooted 
+Nora_tree$edge.length #gives back all branch lengths in millions of years.
+Nora_tree$tip.label #gives back names of tips (species names), this is a matrix
+
+# making dataframe of tip.label species with tip number and species name
+species_labels_df <- as.data.frame(Nora_tree$tip.label) 
+head(species_labels_df)
+str(species_labels_df)
+
+# save csv to modify it in excel
+write.csv(species_labels_df, "./Data/species_labels_df.csv")
+
+# open modified csv
+species_labels_df <- read.csv("./Data/species_labels_df2.csv")
+
+# get back row numbers (tip numbers) of those species to keep
+which(species_labels_df$keep == 1)
+
+# count how many were selected
+length(which(species_labels_df$keep == 1)) #I'm keeping 19 species 
+
+# return df with those selected
+species_labels_df[which(species_labels_df$keep == 1),] 
+
+# Now you have the tip label numbers of those species to keep in the tree and you proceed to prune it
+
+# Making an object with the selected species
+selected_species <- which(species_labels_df$keep == 1)
+
+# removing all those but the selected species from Nora's tree
+pruned_tree <- drop.tip(Nora_tree, Nora_tree$tip.label[-selected_species]) #this is the tree that you want
+plot(pruned_tree)
+axisPhylo() # adding full scale in million years
+add.scale.bar(length = 10) # or just adding 10 million years scale bar 
+
+# getting information of the new phylo object
+str(pruned_tree) # this tree contains 316 taxa, we need to prune it to 24 only
+is.rooted(pruned_tree) #check that this tree is rooted 
+pruned_tree$edge.length #gives back all branch lengths in millions of years.
+pruned_tree$tip.label #gives back names of tips (species names), this is a matrix
+
+# saving tree
+write.tree(pruned_tree, file = "./Results/pruned_tree.tre")
+
+
+#---- 2. Adding non-included species by divergence time ----
+# loading tree
+pruned_tree <- read.tree("./Results/pruned_tree.tre")
+summary.phylo(pruned_tree)
+plot(pruned_tree)
+axisPhylo()
+edgelabels(pruned_tree$edge.length, col="black", font=0.5)
+
+# adding node numbers
+nodelabels(cex=0.5, adj=c(-0.5,0.5))
+
+# adding tip numbers 
+tiplabels(cex=0.5, adj=c(-0.5,0.5)) #to check numbers
+
+# binding Hirschfeldia incana to S. arvensis and B. nigra node by divergence time of 5.94 Mya
+pruned_tree$tip.label #getting names for tips
+
+node_Hirschfeldia <- getMRCA(pruned_tree, tip = c("NC_035303.1_Sinapis_arvensis", "NC_030450.1_Brassica_nigra")) #selecting node
+
+tree_w_Hirschfeldia <- phytools::bind.tip(pruned_tree, tip.label="Hirschfeldia_incana", 
+                       where=node_Hirschfeldia, position = 3.560341797, edge.length = 5.94) 
+
+# position is the distance between the node and the divergence time = 8.3843489 from branch of B. rapa - 5.94 Mya divergence = 3.560341797
+tree_w_Hirschfeldia_df <- as_tibble(tree_w_Hirschfeldia)
+View(tree_w_Hirschfeldia_df)
+
+plot(tree_w_Hirschfeldia)
+summary.phylo(tree_w_Hirschfeldia)  
+
+# saving tree
+write.tree(tree_w_Hirschfeldia, file = "./Results/tree_w_Hirschfeldia.tre")
+
+
+
+
+# binding Brassica oleracea to B. rapa tip by divergence time of 2.98 Mya
+nodelabels(cex=0.5, adj=c(-0.5,0.5)) #getting new node numbers
+tree_w_Hirschfeldia$tip.label #getting names
+tip_Brapa <- which(tree_w_Hirschfeldia$tip.label=="NC_015139.1_Brassica_rapa_pekinensis") #tip number of B, rapa to add B. oleracea
+
+tree_w_Bole <- bind.tip(tree_w_Hirschfeldia, tip.label="Brassica_oleracea", 
+                                where=tip_Brapa, position= 2.98, edge.length = 5.4043489)
+plot(tree_w_Bole)
+summary.phylo(tree_w_Bole)
+
+# binding Diplotaxis to B. rapa and B. ole node by divergence time of 6.47 Mya
+nodelabels(cex=0.5, adj=c(-0.5,0.5)) #getting new node numbers
+
+tree_w_Diplotaxis <- bind.tip(tree_w_Bole, tip.label="Diplotaxis_tenuifolia", 
+                        where=39, position=6.47)
+
+plot(tree_w_Diplotaxis)
+axisPhylo()
+
+str(tree_w_Diplotaxis)
+
+
+#---- 3. Adding non-included species by divergence time, using tidytree ----
+# loading tree
+pruned_tree <- read.tree("./Results/pruned_tree.tre")
+summary.phylo(pruned_tree)
+class(pruned_tree)
+plot(pruned_tree)
+axisPhylo()
+nodelabels(cex=0.5, adj=c(-0.5,0.5))
+
+# making df of tree
+pruned_tree_df <- as_tibble(pruned_tree)
+View(pruned_tree_df)
+
+
+
+child(pruned_tree_df,5)
+
+
+plot(tree_w_Hirschfeldia)
+nodelabels(cex=0.5, adj=c(-0.5,0.5))
+
+
+#---- 4. Adding non-included species by divergence time, manually modifying NExus file ----
+
+# first saving it as nexus file
+phytools::writeNexus(pruned_tree, file="./Results/pruned_nexus")
+
+# opening tree after making modifications, first entering Hirschfeldia incana 
+pruned_w_Hirschfeldia <- read.nexus(file="./Results/pruned_nexus")
+plot(pruned_w_Hirschfeldia)
+summary.phylo(pruned_w_Hirschfeldia)
+pruned_w_Hirschfeldia$edge.length
+
+pruned_w_Diplotaxis <- read.nexus(file="./Results/pruned_nexus_Diplotaxis")
+plot(pruned_w_Diplotaxis)
+summary.phylo(pruned_w_Hirschfeldia)
+pruned_w_Hirschfeldia$edge.length
+
+pruned_w_Brassica <- read.nexus(file="./Results/pruned_nexus _Brassica_oleracea")
+pruned_w_Brassica2 <- read.nexus(file="./Results/pruned_nexus _Brassica_oleracea") #YAYYY!! :)
+
+plot(pruned_w_Brassica2)
+summary.phylo(pruned_w_Brassica2)
+pruned_w_Brassica2$edge.length
+
+phytools::writeNexus(pruned_w_Brassica2, file="./Results/pruned_nexus_Brassica_oleracea")
+write.tree(pruned_w_Brassica2, file = "./Results/pruned_nexus_Brassica_oleracea.tre")
+
+# I leave it here, my brain cannot function anymore, the only thing missing is to add Diplotaxis tenuifolia to the branch of 
+# B. rapa and B. oleracea with a divergence time of 6.47
+
+
+
+
+#---- Examples ----
+
+
+# example from https://www.rdocumentation.org/packages/phytools/versions/1.0-1/topics/bind.tip
+set.seed(123)
+tree <- pbtree(b=0.1, n=10)
+plot(tree)
+summary.phylo(tree2)
+axisPhylo()
+nodelabels(cex=0.5, adj=c(-0.5,0.5))
+tiplabels(cex=0.5, adj=c(-0.5,0.5)) #to check numbers
+
+## add an extant tip ("t_extant") sister to taxon 't5' 
+## with divergence time of 4.5 Ma
+node <- which(tree$tip.label=="t5")
+tree2 <- bind.tip(tree, tip.label="t_extant", 
+                 where=node, position=4.5)
+
+# plot to see the result
+plot(tree2)
+axisPhylo()
+
+## add an extinct tip ("t_extinct") sister to 't2' with 
+## divergence time of 7.8 Ma and duration (edge length) of 
+## 3.3 Ma
+node <- which(tree$tip.label=="t2") 
+tree3 <- bind.tip(tree2, tip.label="t_extinct", where=node, 
+                 position=7.8, edge.length=3.3)
+
+## plot to see the result
+plot(tree3)
+axisPhylo()
+         
+
+# example from Stack Overflow: https://stackoverflow.com/questions/51696837/r-phylo-object-how-to-connect-node-label-and-node-number
+
+#suggestion to use
+tree$node.label[node_number - Ntip(tree)]
+
+## Simulating a random tree
+set.seed(1)
+my_tree <- rtree(10)
+my_tree$node.label <- paste0("node", seq(1:9))
+plot(my_tree)
+nodelabels(cex=0.5, adj=c(-0.5,0.5))
+tiplabels(cex=0.5, adj=c(-0.5,0.5))
+
+## Method 1: selecting a node of interest (e.g. MRCA)
+mrca_node <- getMRCA(my_tree, tip = c("t1", "t2"))
+#[1] 16
+
+#mrca_node is now the ID of the node in the edge table (in this case a number higher than 10). 
+#To select the equivalent node label you can simply select the number of tips from the mrca_node:
+  
+## The node label for the mrca_node
+my_tree$node.label[mrca_node-Ntip(my_tree)]
+#[1] "node6"  
+
+
+```
+
+
+
+

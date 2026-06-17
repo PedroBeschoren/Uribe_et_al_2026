@@ -1,0 +1,447 @@
+---
+title: "3_Alpha_Diversity_CLEAN"
+author: "Zulema Carracedo Lorenzo"
+date: "2023-08-02"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+---
+This script has as a goal to analyse the alpha diversity of the Brassica species included in the million year tree.
+```{r results="hide"}
+
+#Load libraries
+
+library(phyloseq)
+library(microbiome)
+library(vegan)
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+library(ggpubr)
+library(tibble)
+library(car)
+library(purrr)
+library(ggbreak) #for break barplot
+
+
+# increases memory limit used by R
+memory.limit(size = 350000)
+
+# this will load the unfiltered unnormalized phyloseq objects for 16S and ITS 
+
+load("./Data/phyloseq_objects/unfiltered_unnormalized_bac_rhizo_ps.RData") 
+load("./Data/phyloseq_objects/unfiltered_unnormalized_fun_rhizo_ps.RData")
+
+#load needed functions for this script
+
+source("./renv/functions/lapply_lapply.R")
+
+
+# we will select only the Brassica samples from the million year tree
+#define species present in the MY tree
+MY_tree <- c("At", "Al", "Cas", "Tg", "Ec", "Mm", "Bv",
+                "Lr", "Ds", "Bi", "Bn", "Sar", "Hi", "Br", "Bo_M", 
+                "Dt", "Si", "It", "Co", "Lm", "Ia", "Es")
+
+#define function to update ps objects
+add_MY_metadata<-function(ps_obj){
+ps_obj@sam_data$MY_tree_presence<-ifelse(test = ps_obj@sam_data$Sp_abb_name %in% MY_tree,
+                                       yes = "inside_MY_tree",
+                                       no = "outside_MY_tree")
+return(ps_obj)
+}
+
+unfiltered_unnormalized_bac_rhizo_ps <- add_MY_metadata(unfiltered_unnormalized_bac_rhizo_ps) #now tree data is added
+
+unfiltered_unnormalized_fun_rhizo_ps <- add_MY_metadata(unfiltered_unnormalized_fun_rhizo_ps) #now tree data is added
+
+#Now make a new phyloseq object with only plant species present in the phylogenetic tree
+
+keep_tree_species <- function(x) subset_samples(x, MY_tree_presence == "inside_MY_tree")
+
+tree_bac_rhizo_ps <- keep_tree_species(unfiltered_unnormalized_bac_rhizo_ps)
+
+tree_bac_rhizo_ps <- prune_taxa(taxa_sums(tree_bac_rhizo_ps) >0,tree_bac_rhizo_ps) #we need to prune the ASV that are not present in the subset
+
+tree_fun_rhizo_ps <- keep_tree_species(unfiltered_unnormalized_fun_rhizo_ps)
+
+tree_fun_rhizo_ps <- prune_taxa(taxa_sums(tree_fun_rhizo_ps) >0,tree_fun_rhizo_ps) #we need to prune the ASV that are not present in the subset
+
+tree_BacFun_rhizo_ps <- list(tree_bac_rhizo_ps, tree_fun_rhizo_ps) #make a list with the two phyloseq objects
+
+rm(unfiltered_unnormalized_bac_rhizo_ps) #we don't need the full phyloseq object
+rm(unfiltered_unnormalized_fun_rhizo_ps) #we don't need the full phyloseq object
+
+
+#Color blind friendly palette for plots
+cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+
+phylogeny_vector <- c("Arabidopsis_lyrata", "Arabidopsis_thaliana", "Camelina_sativa", "Turritis_glabra","Erysium_cheirantoides","Malcomia_maritima","Descurainia_sophiades","Lepidium_ruderale", "Barbarea_vulgaris",  "Berteroa_incana", "Euclydium_syriacum", "Brassica_rapa",  "Brassica_oleraceae_Rivera_Medium","Hirschfeldia_incana","Sinapis_arvensis","Diplotaxis_tenuifolia","Brassica_nigra", "Isatis_tinctoria", "Sysimbrium_irio","Cochlearia_officinalis", "Lobularia_maritima", "Iberis_amara") #needed for the plots
+```
+
+# 3.0 Basic alpha diversity analysis
+
+
+Alpha diversity will show you the quantifiable diversity within a sample - this way you compare which treatment is more or less diverse or species-rich than the other.
+
+Alpha diversity requires counts from samples with equal samples sizes. This means we cannot use the CSS transformation from the metagenomeseq package, we will use unfiltered data. 
+
+
+
+#3.1. Alpha diversity testing
+
+##3.1.1. Overall ANOVA (Supplementary Table S3)
+```{r}
+
+#define function to calculate alpha diversity and then add sample metadata
+add_diversity_to_physeq_object<-function (phyloseq_object){
+
+#Calculate richness  of a single phyloseq object
+
+total_diversity<-estimate_richness(phyloseq_object)%>%
+  rownames_to_column(var = "Sample")
+
+total_diversity$Sample<-sub("X", "", total_diversity$Sample)# this removes the X that appears at the beginning of the first column
+
+total_diversity<-column_to_rownames(total_diversity, var= "Sample")
+
+
+#### add diversity metrics to mapping file of phyloseq objects
+# we do this so we can perform anovas, access metadata, make nicer plots, etc
+merg_to_ps<-sample_data(total_diversity) # makes the diversity calculations  sample_data for phyloseq object
+sample_data(phyloseq_object)<-merge_phyloseq(phyloseq_object,merg_to_ps) # merge the new phyloseq object with the old phyloseq object
+diversity<-as(sample_data(phyloseq_object),"data.frame") # forces sample data of updated phyloseq object into a dataframe
+
+return (diversity)
+}
+
+# Calculate diversity for all samples
+diversity_all <- lapply(tree_BacFun_rhizo_ps, add_diversity_to_physeq_object)
+#For bacteria
+
+save(diversity_all, file = "./03_Alpha_Diversity/r_objects/Diversity_all.RData")
+
+diversity_all[[1]]$Shannon #here we have the Shannon indexes for 16S samples
+
+aov_bac <- aov(diversity_all[[1]]$Shannon ~ Block + Sp_full_name + Stress, data = diversity_all[[1]])
+
+overall_anova_bac <- summary(aov_bac) #Supplementary Table S3-A
+
+
+
+#For fungi
+
+diversity_all[[2]]$Shannon #here we have the Shannon indexes for 16S samples
+
+aov_fun <- aov(diversity_all[[2]]$Shannon ~ Block + Sp_full_name + Stress, data = diversity_all[[2]])
+
+overall_anova_fun <- summary(aov_fun) #Supplementary Table S3-B
+
+
+```
+
+
+##3.1.2. ANOVA per plant species
+```{r}
+
+# Calculate diversity per species
+tree_species_ps_l <- lapply(tree_BacFun_rhizo_ps, function (x) metagMisc::phyloseq_sep_variable(x, variable = "Sp_full_name")) 
+
+diversity <- lapply_lapply(tree_species_ps_l, add_diversity_to_physeq_object)
+names(diversity) <- c('Bac','Fun')
+
+save(diversity_all, file = "./03_Alpha_Diversity/r_objects/Diversity_per_species.RData")
+
+# Calculate ANOVA
+
+#first make a function that builds the model. We want to test the effect of block and stress 
+aov_list <- function (diversity_output){aov(lm((Shannon) ~ Stress + Block, data = diversity_output))}
+
+aov_all_l <- lapply_lapply(diversity, aov_list) 
+save(aov_all_l, file = "./03_Alpha_Diversity/r_objects/aov_all_l.RData")
+
+anova_function <- function (aov_l){anova(aov_l)}
+anova <- lapply_lapply(aov_all_l, anova_function) #calculates anova
+anova
+
+#Function for extracting p-values and R2 of stress and block effects 
+anova_output_to_plot_input<-function(anova_output_l){
+
+p_values <-map(anova_output_l, 5)
+list_lenght<-length(p_values)
+
+#make vectors with data of interest
+vector_of_p_stress <- as.vector(unlist(map(p_values,1)))
+vector_of_p_block <- as.vector(unlist(map(p_values,2)))
+
+
+# make a vector with all p values
+vector_p <- c(vector_of_p_stress,
+              vector_of_p_block)
+
+
+#defines factors
+factor_text<-c(rep("Stress", list_lenght),
+          rep("Block", list_lenght))
+
+
+species_name<-names(c(p_values, p_values))
+
+
+#join vectors in a dataframe
+p_df<- data.frame(species_name, # names of species in list
+                  as.factor(factor_text), # Stress and block as factors
+                      vector_p) # p values for the stress and then for the block
+
+
+#change anmes of columns in dataframe
+names(p_df)<-c("species","factor", "pvalue")
+
+#output
+return(p_df)
+
+}
+
+#Lets first check the anova results for 16S
+
+anova_results_Bac_df <- anova_output_to_plot_input(anova$Bac)
+
+anova_results_Bac_df$fdr_pvalue <- stats::p.adjust(p = anova_results_Bac_df$pvalue, method = "fdr") #Add FDR pvalue correction
+
+
+
+save(anova_results_Bac_df, 
+    file = "./03_Alpha_Diversity/r_objects/anova_results_Bac_df.RData")
+
+#load(file = "./03_Alpha_Diversity/r_objects/Final_paper/anova_results_Bac_df.RData")
+
+
+
+anova_results_Bac_df <- anova_results_Bac_df %>%
+  arrange(match(factor, c("Stress", "Block")))%>%
+    arrange(match(species, phylogeny_vector)) 
+     #arrange order according to phylogeny
+
+anova_results_Bac_df$species <- factor(anova_results_Bac_df$species, levels = phylogeny_vector) 
+anova_results_Bac_df$factor <- factor(anova_results_Bac_df$factor, levels = c("Stress", "Block")) #arrange order for ggplot
+
+write.csv(anova_results_Bac_df, "./03_Alpha_diversity/results/pval_Bac_Shannon_brassica_df.csv", row.names=FALSE) 
+
+
+
+#Now lets look to ITS samples
+anova_results_Fun_df <- anova_output_to_plot_input(anova$Fun)
+anova_results_Fun_df$fdr_pvalue <- stats::p.adjust(p = anova_results_Fun_df$pvalue, method = "fdr") #Add FDR pvalue correction
+
+save(anova_results_Fun_df, 
+     file = "./03_Alpha_Diversity/r_objects/anova_results_Fun_df.RData")
+#load(file = "./03_Alpha_Diversity/r_objects/anova_results_Fun_df.RData")
+
+
+anova_results_Fun_df <- anova_results_Fun_df %>%
+  arrange(match(factor, c("Stress",  "Block")))%>%
+    arrange(match(species, phylogeny_vector)) 
+     #arrange order according to phylogeny
+
+anova_results_Fun_df$species <- factor(anova_results_Fun_df$species, levels = phylogeny_vector) 
+anova_results_Fun_df$factor <- factor(anova_results_Fun_df$factor, levels = c("Stress", "Block")) #arrange order for ggplot
+
+write.csv(anova_results_Fun_df, "./03_Alpha_diversity/results/pval_Fun_Shannon_brassica_df.csv", row.names=FALSE) 
+
+
+```
+
+##3.1.2. Tukey (Statistics Suppl. Figure S5)
+
+```{r}
+#post-hoc -> check tukey
+
+tukey_function <- function(aov_list){TukeyHSD(aov_list, "Stress")}
+
+tukey_output_l <- lapply_lapply(aov_all_l, tukey_function)
+tukey_output_l
+
+tukey_output_to_plot_input <- function(tukey_output_l){
+  
+#select the p-values for each pair of stress factor  
+  
+p_values_MeJA_Cntrl_l <- map(tukey_output_l, 10) #MeJA Cntrl
+p_values_SA_Cntrl_l <- map(tukey_output_l, 11) #SA Cntrl
+p_values_SA_MeJA_l <- map(tukey_output_l, 12) #SA MeJa
+list_lenght<-length(p_values_MeJA_Cntrl_l)
+
+vector_MeJA_Cntrl <- as.vector(unlist(p_values_MeJA_Cntrl_l, use.names = FALSE))
+vector_SA_Cntrl <- as.vector(unlist(p_values_SA_Cntrl_l, use.names = FALSE))
+vector_SA_MeJA <- as.vector(unlist(p_values_SA_MeJA_l, use.names = FALSE))
+
+p_values <- c(vector_MeJA_Cntrl,
+            vector_SA_Cntrl,
+            vector_SA_MeJA)
+
+list_lenght<-length(p_values_MeJA_Cntrl_l)
+
+stress <-c(rep("MeJA-Cntrl", list_lenght),
+               rep("SA-Cntrl", list_lenght),
+               rep("SA-MeJA", list_lenght))
+
+
+#join vectors in a dataframe
+p_df<- data.frame(p_values, # p values for the stress and then for the block
+                     # species_name, # names of species in list
+                     stress) # Stress and block as factors
+
+}
+
+output <- lapply_lapply(tukey_output_l, tukey_output_to_plot_input)
+
+
+
+
+#Results Tukey 16S
+tukey_bac <- output$Bac
+
+tukey_bac_df <- do.call(rbind, tukey_bac[phylogeny_vector]) #convert the Tukey output list into a dataframe
+
+tukey_bac_df <- rownames_to_column(tukey_bac_df)
+
+colnames(tukey_bac_df) <- c("species", "p_values", "stress")
+
+tukey_bac_df$species <- gsub("\\.[1-3]$", "", as.character(tukey_bac_df$species)) #fixes the species names
+
+#We should perfom Tukey test only on the species were there was a significant effect of stress in the anova. so let's remove the species that were not having a significant stress effect
+sig_species_Bac <- anova_results_Bac_df %>% subset(factor == "Stress") %>% filter(pvalue < 0.05) %>% select(species)
+
+tukey_bac_df <- merge(tukey_bac_df, sig_species_Bac, by="species")
+
+#make a new column with -log10pvalue
+tukey_bac_df <- tukey_bac_df %>%arrange(match(species, phylogeny_vector)) #arrange order according to phylogeny
+
+tukey_bac_df <- tukey_bac_df%>% mutate(Significance = 
+                                                         case_when(p_values <= 0.001 ~ "***",
+                                                        p_values <= 0.01 ~ "**",
+                                                        p_values <= 0.05 ~ "*",
+                                                        p_values > 0.05 ~ "NS"))
+     
+write.csv(tukey_bac_df, "./03_Alpha_diversity/results/tukey_bac_df.csv", row.names=FALSE) #Statistics Supplementary Figure S5 Bacteria
+
+
+#Results Tukey ITS
+tukey_fun <- output$Fun
+
+tukey_fun_df <- do.call(rbind, tukey_fun[phylogeny_vector]) #convert the Tukey output list into a dataframe
+
+tukey_fun_df <- rownames_to_column(tukey_fun_df)
+
+colnames(tukey_fun_df) <- c("species", "p_values", "stress")
+
+tukey_fun_df$species <- gsub("\\.[1-3]$", "", as.character(tukey_fun_df$species)) #fixes the species names
+
+#We should perfom Tukey test only on the species were there was a significant effect of stress in the anova. so let's remove the species that were not having a significant stress effect
+sig_species_Fun <- anova_results_Fun_df %>% subset(factor == "Stress") %>% filter(pvalue < 0.05) %>% select(species)
+
+tukey_fun_df <- merge(tukey_fun_df, sig_species_Fun, by = "species")
+
+#make a new column with -log10pvalue
+
+tukey_fun_df <- tukey_fun_df %>%arrange(match(species, phylogeny_vector)) #arrange order according to phylogeny
+
+tukey_fun_df <- tukey_fun_df%>% mutate(Significance = 
+                                                         case_when(p_values <= 0.001 ~ "***",
+                                                        p_values <= 0.01 ~ "**",
+                                                        p_values <= 0.05 ~ "*",
+                                                        p_values > 0.05 ~ "NS"))
+     
+write.csv(tukey_fun_df, "./03_Alpha_diversity/results/tukey_fun_df.csv", row.names=FALSE) #Statistics Supplementary Figure S5 Fungi
+
+
+
+
+```
+
+
+
+
+#3.2. Supplementry figure S5
+
+```{r}
+diversity_all
+names(diversity_all) <- c("Bac","Fun")
+
+
+##Fix dataframe for plots
+
+diversity_all$Bac$Sp_full_name <- gsub("_", " ", diversity_all$Bac$Sp_full_name) #fixes the species names
+diversity_all$Fun$Sp_full_name <- gsub("_", " ", diversity_all$Fun$Sp_full_name) #fixes the species names
+
+ diversity_all$Bac <- diversity_all$Bac %>%  mutate(Sp_full_name2 =
+                                                     case_when(Sp_full_name == "Brassica oleraceae Rivera Medium" ~ "Brassica oleracea",
+                                                     TRUE ~ Sp_full_name)) #Renaming B. oleracea
+
+diversity_all$Fun <- diversity_all$Fun %>%  mutate(Sp_full_name2 =
+                                                     case_when(Sp_full_name == "Brassica oleraceae Rivera Medium" ~ "Brassica oleracea",
+                                                     TRUE ~ Sp_full_name)) #Renaming B. oleracea
+
+
+phylogeny_vector <- c("Arabidopsis lyrata", "Arabidopsis thaliana", "Camelina sativa", "Turritis glabra","Erysium cheirantoides","Malcomia maritima","Descurainia sophiades","Lepidium ruderale", "Barbarea vulgaris",  "Berteroa incana", "Euclydium syriacum", "Brassica rapa",  "Brassica oleracea","Hirschfeldia incana","Sinapis arvensis","Diplotaxis tenuifolia","Brassica nigra", "Isatis tinctoria", "Sysimbrium irio","Cochlearia officinalis", "Lobularia maritima", "Iberis amara") #needed for the plots
+
+diversity_all$Bac$Sp_full_name2 <- factor(diversity_all$Bac$Sp_full_name2, levels = phylogeny_vector)#arrange order for ggplot
+diversity_all$Fun$Sp_full_name2 <- factor(diversity_all$Fun$Sp_full_name2, levels = phylogeny_vector)#arrange order for ggplot
+
+names(diversity_all$Bac)[names(diversity_all$Bac) == "Stress"] <- "Treatment" #change stress for treatment
+names(diversity_all$Fun)[names(diversity_all$Fun) == "Stress"] <- "Treatment"  #change stress for treatment
+
+
+##Put bacteria and fungi in the same dataframe and re-do the plot
+
+#Bac
+names(diversity_all$Bac) #I need columns 5, 52 and 56
+
+diversity_Bac <- diversity_all$Bac %>% select(5, 52, 56)
+
+diversity_Bac <- tibble::rownames_to_column(diversity_Bac, "Sample")
+
+diversity_Bac <- diversity_Bac %>%
+  add_column(Kingdom = "Bacteria")
+
+#Fun
+names(diversity_all$Fun) #I need columns 5, 52 and 56
+
+diversity_Fun <- diversity_all$Fun %>% select(5, 50, 54)
+
+diversity_Fun <- tibble::rownames_to_column(diversity_Fun, "Sample")
+
+diversity_Fun <- diversity_Fun %>%
+  add_column(Kingdom = "Fungi")
+
+#Merge
+diversity_BacFun <- rbind(diversity_Bac, diversity_Fun)
+
+diversity_BacFun$Sp_full_name2 <- factor(diversity_BacFun$Sp_full_name2, levels = phylogeny_vector)#arrange order for ggplot
+diversity_BacFun$Treatment <- factor(diversity_BacFun$Treatment, levels=c("SA", "MeJA", "Control"))
+
+#plot
+
+shannon_H_BacFun_boxplot2 <- ggplot(diversity_BacFun, aes(x = Shannon, y = Sp_full_name2, fill = Treatment, colour = Treatment)) +
+  geom_boxplot(width = 0.9) +
+  scale_colour_manual(values=c("Control" = "#999999", 
+                                      "MeJA" = "#E69F00",
+                                      "SA" = "#009E73")) +
+  scale_fill_manual(values=c("Control" = "#999999", 
+                                      "MeJA" = "#E69F00",
+                                      "SA" = "#009E73")) +
+  xlab("Shannon's index H") +
+  ylab("Plant species") +
+  scale_y_discrete(limits=rev) + #to have phylogeny order
+  guides(fill = guide_legend(reverse=TRUE), colour = guide_legend(reverse=TRUE)) +
+  theme_light() +
+  facet_wrap(~Kingdom, scales = "free_x") +
+  theme(text = element_text(size = 30), axis.text.y=element_text(hjust=1, face=c(rep("italic", 22), "plain"))) #for italicizing plant species names
+
+
+ggsave("Supp_Fig_S5.png", path = "./03_Alpha_diversity/results",
+ width = 40, height = 20, units = "in", dpi = 700,limitsize = FALSE )
+
+```
+

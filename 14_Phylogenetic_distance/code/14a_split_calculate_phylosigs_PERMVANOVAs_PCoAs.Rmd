@@ -1,0 +1,590 @@
+---
+title: "14a_split_calculate_phylosigs_PERMANOVAS_PCoAs"
+author: "Pedro_Beschoren"
+date: "20/04/2023"
+output:
+  pdf_document: default
+  html_document: default
+editor_options:
+  chunk_output_type: consolehtml_document
+---
+
+# 14.1 - set up working environemnt
+
+
+```{r}
+# this will load all key libraries for the whole project
+source("./renv/0_load_libraries.R")
+library(plyr)
+library("umap")
+library(RColorBrewer)
+library(cowplot) 
+library(multiblock)
+library(data.table)
+library(ggExtra)
+library(ggplot2)
+# IMPORTANT: load the custom functions necessary to run this script
+source("./14_Phylogenetic_distance/code/custom_functions_PB.R")
+
+
+library(picante)
+library(ape)
+library(adephylo)
+library(ade4)
+library(phylobase)
+library(geiger)
+library(phytools)
+library(vegan)
+library(phyloseq)
+library(dplyr)
+
+
+# increases memory limit used by R
+memory.limit(size = 350000)
+```
+
+# 14.2 - load ps, removie species outside tree 
+
+```{R}
+# load PS data
+load("./Data/phyloseq_objects/CSS_BacFun_rhizoplane_HighFilt_ps_l.RData")
+
+# remove all species outside the MY trees
+CSS_BacFun_rhizoplane_HighFilt_ps_l <- 
+  lapply(CSS_BacFun_rhizoplane_HighFilt_ps_l, function(x) 
+    subset_samples(x, MY_tree_presence == "inside_MY_tree"))
+
+
+```
+
+
+
+# 14.3 - calculate phylogenetic signal with a  single function
+
+
+Bacterial and fungal phylosig, kingdom level only
+```{r}
+
+#calculate phylosig on full bacteria and fungal communities
+pipeline_output_full<- phylogenetic_signal_pipeline(CSS_BacFun_rhizoplane_HighFilt_ps_l,
+                                                         return_plot = TRUE,
+                                                         return_lambda = TRUE,
+                                                         phylogenetic_test = "Abouheif's Cmean",
+                                                         ordination_method = "PCoA",
+                                                         significant_signal_only = FALSE,
+                                                         higher_PC_only = FALSE)
+
+
+
+# mantel pipeline
+mantel_pipeline<-ps_to_mantel_pipeline(ps_obj_l = CSS_BacFun_rhizoplane_HighFilt_ps_l)
+
+
+
+
+
+
+
+```
+
+# ------------------
+# BACTERIAL phylogenetic signal
+# -----------------
+
+# 14.4 - individual phylosig of all bacterial tonomic groups 
+Here we split the microbiome data, with one phyloseq object for each taxonomic level, and then calculate the phylogenetic signal of each taxonomic level. This means we have one phylogenetic signal for c__Alphaproteobacteria, one phylogenetic signal for c__Gammaproteobacteria...
+
+
+## 14.4.1 - prepare a list of ps objects with 1 ps_object per taxon
+```{r}
+
+#make ps list of bac
+ps_taxa_l<-c(phyloseq_sep_tax(CSS_BacFun_rhizoplane_HighFilt_ps_l$Bac, TaxRank = "Phylum"),
+               phyloseq_sep_tax(CSS_BacFun_rhizoplane_HighFilt_ps_l$Bac, TaxRank = "Class"),
+               phyloseq_sep_tax(CSS_BacFun_rhizoplane_HighFilt_ps_l$Bac, TaxRank = "Order"),
+               phyloseq_sep_tax(CSS_BacFun_rhizoplane_HighFilt_ps_l$Bac, TaxRank = "Family"),
+               phyloseq_sep_tax(CSS_BacFun_rhizoplane_HighFilt_ps_l$Bac, TaxRank = "Genus"))
+
+
+
+# remove taxa wihtout least 5 different ASVs (filter, prevents artefacts, prevents UMAP crash)
+ps_taxa_l<-ps_taxa_l[lapply(ps_taxa_l, ntaxa)>5]
+
+
+# taxa must be present at least once in control, once SA and once in  MeJA on every plant species, or lese we ccannot calculate a phylognetic signal (I think that at some point data is divided by zero)
+
+# check if a taxon has zero ASVs across a species_stress combination
+has_bad_zero<-lapply(ps_taxa_l, function(x){
+  
+  melted<-psmelt(x)
+
+melted_summrary<-melted%>%
+  dplyr::group_by(Stress, Sp_abb_name)%>%
+  dplyr::summarise(abu_sum = sum(Abundance))
+
+
+
+taxon_missing_in_sp_Stress<-any(melted_summrary[,3]==0)
+
+  
+})
+
+# remove taxa with zero ASVs in any species_stress combination
+ps_taxa_l<-ps_taxa_l[!unlist(has_bad_zero)]
+
+#remove taxonomies with NA, such as p__NA
+ps_taxa_l<-ps_taxa_l[names(ps_taxa_l)!= "NAs"]
+
+# remove samples with zero ASVs
+samples_to_keep<-lapply(ps_taxa_l, function(x)
+  colSums(otu_table(x))>0)
+
+ps_taxa_l<-mapply(function(x, y)
+  prune_samples(y,x),
+  x = ps_taxa_l,
+  y = samples_to_keep,
+  SIMPLIFY = FALSE)
+
+#add full bac community to top of the list as kingdom_bacteria
+ps_taxa_l<-append(ps_taxa_l, values = CSS_BacFun_rhizoplane_HighFilt_ps_l$Bac, after = 0)
+names(ps_taxa_l)[1]<-"k__Bacteria"
+
+# save list of ps objects, which takes  while to compute
+save(ps_taxa_l, file = "./14_Phylogenetic_distance/r_objects/Bac_alltaxa_pre_phylosig_pipeline_ps_l.RData") 
+```
+
+
+
+## 14.4.2 - calculate phylosig (PCoA, abouheif), save rdata
+```{r}
+
+#load the per-taxa ps object from  chunk 14.4.1
+load(file = "./14_Phylogenetic_distance/r_objects/Bac_alltaxa_pre_phylosig_pipeline_ps_l.RData") 
+
+
+
+
+# run pipeline; ~ 40 min on all bac PCoA - ABOUHEIF
+bac_alltaxa_phylosig_output_PCoA_nonsig<- phylogenetic_signal_pipeline(ps_l = ps_taxa_l,
+                                                                           phylogenetic_test = "Abouheif's Cmean",
+                                                                           ordination_method = "PCoA",
+                                                                           significant_signal_only = FALSE,
+                                                                           return_plot = TRUE, 
+                                                                           higher_PC_only = FALSE,
+                                                                           return_lambda = FALSE) #!
+
+# save object with full phylosig pipeline output
+save(bac_alltaxa_phylosig_output_PCoA_nonsig, file = "./14_Phylogenetic_distance/r_objects/bac_alltaxa_phylosig_output_PCoA_nonsig.RData")
+load(file = "./14_Phylogenetic_distance/r_objects/bac_alltaxa_phylosig_output_PCoA_nonsig.RData") 
+
+
+```
+
+
+
+# Mantel pipeline
+
+```{r}
+
+# run mantel pipeline on all taxonomic groups
+bac_alltaxa_mantel_pipeline<-ps_to_mantel_pipeline(ps_obj_l = ps_taxa_l)
+
+# remove p/r mantel plots as 500 of them simultaneously are not informative
+bac_alltaxa_mantel_pipeline$plot_output<-NULL
+
+# remove  g__env.OPS_17, f__env.OPS_17 - the taxon names are incompatible with the code because of the "." and generate errors
+# these taxa fail the permanova/PCOA quality control and have no significant abouheif. they also do not show a significant mantel result.let's just discard them
+bac_alltaxa_mantel_pipeline$mantel_df_output<-
+  dplyr::filter(bac_alltaxa_mantel_pipeline$mantel_df_output, !Community %in% c("g__env", "f__env"))%>% # removes 2 bad taxa
+    dplyr::select(Community,Treatment,distance,r2_Mantel,p_value,significant) # removes bad columns added by bad taxad ue to "." in name
+
+#adjsut name of "Community" to taxonomic group
+names(bac_alltaxa_mantel_pipeline$mantel_df_output)[1]<-"taxonomic_group"
+
+#save 500 plots
+bac_alltaxa_mantel_pipeline_bray_correlation_plot<-bac_alltaxa_mantel_pipeline$bray_correlation_plot
+save(bac_alltaxa_mantel_pipeline_bray_correlation_plot, 
+     file = "./14_Phylogenetic_distance/r_objects/bac_alltaxa_mantel_pipeline_bray_correlation_plot.RData")
+
+#save df
+bac_alltaxa_mantel_pipeline_df<-bac_alltaxa_mantel_pipeline$mantel_df_output 
+save(bac_alltaxa_mantel_pipeline_df, 
+     file = "./14_Phylogenetic_distance/r_objects/bac_alltaxa_mantel_pipeline_df.RData")
+
+
+```
+
+
+
+
+## Calculate PCoA (and % var explaned) for each taxnomic group, bac and fun 
+```{r}
+# load output of pipeline, Bac 
+load(file ="./14_Phylogenetic_distance/r_objects/bac_alltaxa_phylosig_output_PCoA_nonsig.RData")
+
+
+# load output of pipeline, Fun 
+load(file ="./14_Phylogenetic_distance/r_objects/fun_alltaxa_phylosig_PCoA_nonsig.RData")
+
+
+# run the PCoA axis pct and plot, Bac
+PCoA_528_plots_axis_pct<-
+explained_PCoA_Axis_per_taxonomic_group(ps_obj_l = bac_alltaxa_phylosig_output_PCoA_nonsig$ordination_coordinates_l)
+
+#add names to plots, according taoxnomic group
+PCoA_528_plots_axis_pct$ploted_ordination<-
+mapply(function (x,y)
+  x+ggtitle(label = y),
+  x = PCoA_528_plots_axis_pct$ploted_ordination,
+  y = as.list(names(PCoA_528_plots_axis_pct$ploted_ordination)),
+  SIMPLIFY = FALSE)
+
+#save 528 PCoA plots & ordiantions, Bac
+save(PCoA_528_plots_axis_pct, file = "./14_Phylogenetic_distance/r_objects/PCoA_528_plots_axis_pct.RData")
+
+# run the 70  PCoA axis pct and plot, Fun
+PCoA_Fun_70_plots_axis_pct<-
+  explained_PCoA_Axis_per_taxonomic_group(ps_obj_l = fun_alltaxa_phylosig_PCoA_nonsig$ordination_coordinates_l)
+
+
+#add names to plots, according taxonomic group
+PCoA_Fun_70_plots_axis_pct$ploted_ordination<-
+mapply(function (x,y)
+  x+ggtitle(label = y),
+  x = PCoA_Fun_70_plots_axis_pct$ploted_ordination,
+  y = as.list(names(PCoA_Fun_70_plots_axis_pct$ploted_ordination)),
+  SIMPLIFY = FALSE)
+
+#save 70 PCoA plots & ordiantions, Fun
+save(PCoA_Fun_70_plots_axis_pct, file = "./14_Phylogenetic_distance/r_objects/PCoA_Fun_70_plots_axis_pct.RData")
+
+ 
+
+
+#split by stress, re-run function, Bac
+Control_ps_l<-
+  lapply(bac_alltaxa_phylosig_output_PCoA_nonsig$ordination_coordinates_l, function (x)
+    subset_samples(x, Stress =="Control"))
+
+MeJA_ps_l<-
+  lapply(bac_alltaxa_phylosig_output_PCoA_nonsig$ordination_coordinates_l, function (x)
+    subset_samples(x, Stress =="MeJA"))
+
+SA_ps_l<-
+  lapply(bac_alltaxa_phylosig_output_PCoA_nonsig$ordination_coordinates_l, function (x)
+    subset_samples(x, Stress =="SA"))
+
+# run the PoA axis pct and plot, bac
+PCoA_528_plots_axis_pct_Control<-
+  explained_PCoA_Axis_per_taxonomic_group(ps_obj_l = Control_ps_l)
+
+PCoA_528_plots_axis_pct_MeJA<-
+  explained_PCoA_Axis_per_taxonomic_group(ps_obj_l = MeJA_ps_l)
+
+PCoA_528_plots_axis_pct_SA<-
+  explained_PCoA_Axis_per_taxonomic_group(ps_obj_l = SA_ps_l)
+
+
+#add names to plots, according taxonomic group
+PCoA_528_plots_axis_pct_Control$ploted_ordination<-
+mapply(function (x,y)
+  x+ggtitle(label = y),
+  x = PCoA_528_plots_axis_pct_Control$ploted_ordination,
+  y = as.list(names(PCoA_528_plots_axis_pct_Control$ploted_ordination)),
+  SIMPLIFY = FALSE)
+names(PCoA_528_plots_axis_pct_Control)<-paste0(names(PCoA_528_plots_axis_pct_Control), "_Control")
+
+PCoA_528_plots_axis_pct_MeJA$ploted_ordination<-
+mapply(function (x,y)
+  x+ggtitle(label = y),
+  x = PCoA_528_plots_axis_pct_MeJA$ploted_ordination,
+  y = as.list(names(PCoA_528_plots_axis_pct_MeJA$ploted_ordination)),
+  SIMPLIFY = FALSE)
+names(PCoA_528_plots_axis_pct_MeJA)<-paste0(names(PCoA_528_plots_axis_pct_MeJA), "_MeJA")
+
+PCoA_528_plots_axis_pct_SA$ploted_ordination<-
+mapply(function (x,y)
+  x+ggtitle(label = y),
+  x = PCoA_528_plots_axis_pct_SA$ploted_ordination,
+  y = as.list(names(PCoA_528_plots_axis_pct_SA$ploted_ordination)),
+  SIMPLIFY = FALSE)
+names(PCoA_528_plots_axis_pct_SA)<-paste0(names(PCoA_528_plots_axis_pct_SA), "_SA")
+
+
+# combine lists and save, bac
+PCoA_528_3x_plots_axis_pct<-c(PCoA_528_plots_axis_pct_Control,
+                              PCoA_528_plots_axis_pct_MeJA,
+                              PCoA_528_plots_axis_pct_SA)
+
+save(PCoA_528_3x_plots_axis_pct, file = "./14_Phylogenetic_distance/r_objects/PCoA_528_3x_plots_axis_pct.RData")
+
+
+
+
+
+#split by stress, re-run function, Fun
+Control_Fun_ps_l<-
+  lapply(fun_alltaxa_phylosig_PCoA_nonsig$ordination_coordinates_l, function (x)
+    subset_samples(x, Stress =="Control"))
+
+MeJA_Fun_ps_l<-
+  lapply(fun_alltaxa_phylosig_PCoA_nonsig$ordination_coordinates_l, function (x)
+    subset_samples(x, Stress =="MeJA"))
+
+SA_Fun_ps_l<-
+  lapply(fun_alltaxa_phylosig_PCoA_nonsig$ordination_coordinates_l, function (x)
+    subset_samples(x, Stress =="SA"))
+
+# run the PoA axis pct and plot, Fun
+PCoA_Fun_528_plots_axis_pct_Control<-
+  explained_PCoA_Axis_per_taxonomic_group(ps_obj_l = Control_Fun_ps_l)
+names(PCoA_Fun_528_plots_axis_pct_Control)<-paste0(names(PCoA_Fun_528_plots_axis_pct_Control), "_Control")
+
+PCoA_Fun_528_plots_axis_pct_MeJA<-
+  explained_PCoA_Axis_per_taxonomic_group(ps_obj_l = MeJA_Fun_ps_l)
+names(PCoA_Fun_528_plots_axis_pct_MeJA)<-paste0(names(PCoA_Fun_528_plots_axis_pct_MeJA), "_MeJA")
+
+PCoA_Fun_528_plots_axis_pct_SA<-
+  explained_PCoA_Axis_per_taxonomic_group(ps_obj_l = SA_Fun_ps_l)
+names(PCoA_Fun_528_plots_axis_pct_SA)<-paste0(names(PCoA_Fun_528_plots_axis_pct_SA), "_SA")
+
+
+# combine lists and save, Fun
+PCoA_Fun_70_3x_plots_axis_pct<-c(PCoA_Fun_528_plots_axis_pct_Control,
+                              PCoA_Fun_528_plots_axis_pct_MeJA,
+                              PCoA_Fun_528_plots_axis_pct_SA)
+
+save(PCoA_Fun_70_3x_plots_axis_pct, file = "./14_Phylogenetic_distance/r_objects/PCoA_Fun_70_3x_plots_axis_pct.RData")
+
+
+```
+
+
+
+
+
+
+## Calcualte PERMANOVAS for the 528 taxonomic groups...
+
+... with the HPC
+
+*ATTENTION* The 528 permanova set was calculated in the anunnna HPC. this chunk will source the R code used for this step. It will fail if you run it natively on windows because of the parallel computing made by mcmapply and mclapply. The slurm file for submitng the job to the HPC is available on "./14_Phylogenetic_distance/code/528_permanovas.R" 
+
+if you do not use the HPC for these calculations, ignore this chunk and run the next one that has adapted code for local windows machines
+
+```{r}
+source("./14_Phylogenetic_distance/code/528_permanovas.R")
+```
+
+Alternatively calculate PERMANOVAS for the 528 taxonomic groups locally, without an HPC
+
+```{r}
+
+
+# testing sp*stress per taxonomic group is a priority. this function will perform that
+permanova_per_taxonomic_group_spXstress<-function(ps_obj_l){
+  # ps_obj_l = a list of phyloseq objects, split by taxonomic group
+  
+  
+  
+  ps_obj_l<- lapply(ps_obj_l, function(x){
+    
+    x@sam_data$Sp_Lineage_Walden_extended<-
+      if_else(condition = x@sam_data$Sp_abb_name %in% c("Ia", "Lm", "Co", "Bi"), 
+              true ="lineage_II_extended",
+              false =  x@sam_data$Sp_Lineage_Walden)
+    
+    return(x)
+    
+  })
+  
+  
+  #calculate permanova at individual stress conditions
+  set.seed(303848)
+  permanova_l <- lapply(ps_obj_l, function (x)
+    adonis2(formula = phyloseq::distance(t(otu_table(x)), method="bray") 
+            ~ Sp_full_name + Stress + Sp_full_name*Stress + Block,
+            data = as(sample_data(x),"data.frame"), # changing with as.data.frame is insufficient
+            permutations = 999, by = "terms"))
+  
+  
+  beta_disper_l <- lapply(ps_obj_l, function (x){
+    
+    beta_disper_sp <-  betadisper(phyloseq::distance(t(otu_table(x)), method = "bray"), 
+                                  sample_data(x)$Sp_abb_name)
+    beta_disper_stress <-  betadisper(phyloseq::distance(t(otu_table(x)), method = "bray"),
+                                      sample_data(x)$Stress)
+    beta_disper_block <-  betadisper(phyloseq::distance(t(otu_table(x)), method = "bray"),
+                                     sample_data(x)$Block)
+    
+    output<-list("beta_disper_sp" = beta_disper_sp,
+                 "beta_disper_stress" = beta_disper_stress,
+                 "beta_disper_block" = beta_disper_block)
+    
+    return(output)     
+  })
+  
+  
+  
+  output<-list("permanova_l" = permanova_l,
+               "beta_disper_l" = beta_disper_l)
+  
+  return(output)
+  
+}
+
+#run permanvoas
+permanovas_spXstress_528<-
+  permanova_per_taxonomic_group_spXstress(ps_obj_l = bac_alltaxa_phylosig_output_PCoA_nonsig$ordination_coordinates_l)
+
+
+# save permanovas
+save(permanovas_spXstress_528, file ="./14_Phylogenetic_distance/r_objects/permanovas_spXstress_528.RData")
+
+
+```
+
+
+
+
+
+# ------------------
+# FUNGAL phylogenetic signal
+# -----------------
+
+
+
+# 14.10 - individual phylosig of all fungal tonomic groups 
+Here we split the microbiome data, with one phyloseq object for each taxonomic level, and then calculate the phylogenetic signal of each taxonomic level. This means we have one phylogenetic signal for c__Eurotiomycetes, one phylogenetic signal for c__Sordariomycetes...
+
+
+
+# 14.10.1 - prepare a list of ps objects with 1 ps object per taxon
+
+```{r}
+
+
+#make ps list of bac
+ps_taxa_l_fun<-c( "k__Fungi" = CSS_BacFun_rhizoplane_HighFilt_ps_l$Fun,
+              phyloseq_sep_tax(CSS_BacFun_rhizoplane_HighFilt_ps_l$Fun, TaxRank = "Phylum"),
+               phyloseq_sep_tax(CSS_BacFun_rhizoplane_HighFilt_ps_l$Fun, TaxRank = "Class"),
+               phyloseq_sep_tax(CSS_BacFun_rhizoplane_HighFilt_ps_l$Fun, TaxRank = "Order"),
+              phyloseq_sep_tax(CSS_BacFun_rhizoplane_HighFilt_ps_l$Fun, TaxRank = "Family"),
+              phyloseq_sep_tax(CSS_BacFun_rhizoplane_HighFilt_ps_l$Fun, TaxRank = "Genus"))
+
+
+# remove taxa wihtout least 5 different ASVs, or UMAP crashes
+# ps_taxa_l_fun<-ps_taxa_l_fun[lapply(ps_taxa_l, ntaxa)>5]
+
+# taxa msut be present at least once in control, once SA and once in  MeJA on every plant species
+
+
+
+
+# check if a taxon has zero ASVs across a species_stress combination; we can't calculate phylosig with that
+has_bad_zero_fun<-lapply(ps_taxa_l_fun, function(x){
+  
+  melted<-psmelt(x)
+
+melted_summrary<-melted%>%
+  dplyr::group_by(Stress, Sp_abb_name)%>%
+  dplyr::summarise(abu_sum = sum(Abundance))
+
+
+
+taxon_missing_in_sp_Stress<-any(melted_summrary[,3]==0)
+
+
+  
+})
+
+
+# remove taxa with zero ASVs in any species_stress combination
+ps_taxa_l_fun<-ps_taxa_l_fun[!unlist(has_bad_zero_fun)]
+
+
+
+
+#remove taxonomies with NA, such as p__NA
+ps_taxa_l_fun<-ps_taxa_l_fun[names(ps_taxa_l_fun)!= "NAs"]
+
+# remove samples with zero ASVs
+samples_to_keep<-lapply(ps_taxa_l_fun, function(x)
+  colSums(otu_table(x))>0)
+
+ps_taxa_l_fun<-mapply(function(x, y)
+  prune_samples(y,x),
+  x = ps_taxa_l_fun,
+  y = samples_to_keep,
+  SIMPLIFY = FALSE)
+
+
+# save list of ps objects, which takes  while to compute
+save(ps_taxa_l_fun, file = "./14_Phylogenetic_distance/r_objects/ps_taxa_l_fun_pre_phylosig.RData") 
+
+
+
+```
+
+
+
+
+
+## 14.10.2 - calculate phylosig (PCoA, abouheif), save rdata
+
+
+```{r}
+
+# load list of fungal ps objects, which takes  while to compute
+load(file = "./14_Phylogenetic_distance/r_objects/ps_taxa_l_fun_pre_phylosig.RData") 
+ps_taxa_l_fun
+
+
+# run pipeline
+fun_alltaxa_phylosig_PCoA_nonsig<- phylogenetic_signal_pipeline(ps_l = ps_taxa_l_fun,
+                                                     phylogenetic_test = "Abouheif's Cmean",
+                                                     ordination_method = "PCoA",
+                                                     significant_signal_only = FALSE,
+                                                     return_plot = TRUE, 
+                                                     higher_PC_only = FALSE,
+                                                     return_lambda = FALSE)
+
+
+save(fun_alltaxa_phylosig_PCoA_nonsig, 
+     file = "./14_Phylogenetic_distance/r_objects/fun_alltaxa_phylosig_PCoA_nonsig.RData") 
+
+
+
+```
+
+
+
+
+
+# Mantel pipeline
+
+```{r}
+
+# run mantel pipeline on all taxonomic groups
+fun_alltaxa_mantel_pipeline<-ps_to_mantel_pipeline(ps_obj_l = ps_taxa_l_fun)
+
+# remove p/r mantel plots as 500 of them simultaneously are not informative
+fun_alltaxa_mantel_pipeline$plot_output<-NULL
+
+#adjsut name of "Community" to taxonomic group
+names(fun_alltaxa_mantel_pipeline$mantel_df_output)[1]<-"taxonomic_group"
+
+#save 500 plots
+fun_alltaxa_mantel_pipeline_bray_correlation_plot<-fun_alltaxa_mantel_pipeline$bray_correlation_plot
+save(fun_alltaxa_mantel_pipeline_bray_correlation_plot, 
+     file = "./14_Phylogenetic_distance/r_objects/fun_alltaxa_mantel_pipeline_bray_correlation_plot.RData")
+
+#save df
+fun_alltaxa_mantel_pipeline_df<-fun_alltaxa_mantel_pipeline$mantel_df_output 
+save(fun_alltaxa_mantel_pipeline_df, 
+     file = "./14_Phylogenetic_distance/r_objects/fun_alltaxa_mantel_pipeline_df.RData")
+
+
+```
+
+

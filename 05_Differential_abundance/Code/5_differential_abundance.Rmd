@@ -1,0 +1,2330 @@
+---
+title: "5_differential_abundance"
+author: "Melissa Uribe"
+date: "March 25, 2022"
+output: Rmd file
+editor_options: 
+  chunk_output_type: console
+---
+## 5.01 load libraries, improve memory use and subset objects for the desired treatment comparisons
+```{r results="hide"}
+# this will load all key libraries for the whole project
+source("./renv/0_load_libraries.R")
+
+# increases memory limit used by R
+memory.limit(size = 350000)    
+
+#Load object with bac and fun and separate to each group
+load("./Data/phyloseq_objects/unnormalized_BacFun_rhizoplane_HighFilt_ps_l.RData")
+unnorm_Bac_ps <- unnormalized_BacFun_rhizoplane_HighFilt_ps_l[["Bac"]]
+unnorm_Fun_ps <- unnormalized_BacFun_rhizoplane_HighFilt_ps_l[["Fun"]]
+
+#BACTERIA
+##Make vectors for Meja and SA 
+MeJA <-c("MeJA")
+SA <-c("SA")
+
+MeJA_unnorm_Bac_ps <- subset_samples(unnorm_Bac_ps, !Stress %in% SA)
+SA_unnorm_Bac_ps <- subset_samples(unnorm_Bac_ps, !Stress %in% MeJA)
+
+#separate to each plant species
+MeJA_unnorm_Bac_ps_l <- metagMisc::phyloseq_sep_variable(MeJA_unnorm_Bac_ps, variable = "Sp_abb_name")
+SA_unnorm_Bac_ps_l <- metagMisc::phyloseq_sep_variable(SA_unnorm_Bac_ps, variable = "Sp_abb_name")
+
+#Save the unfiltered (with zeroes) object for Standard DESeq
+MeJA_unnorm_Bac_ps_l_unfilt <- MeJA_unnorm_Bac_ps_l
+SA_unnorm_Bac_ps_l_unfilt <- SA_unnorm_Bac_ps_l
+
+save(MeJA_unnorm_Bac_ps_l_unfilt,  
+     file = "./05_Differential_abundance/Objects/MeJA_unnorm_Bac_ps_l_unfilt.RData")
+save(SA_unnorm_Bac_ps_l_unfilt,  
+     file = "./05_Differential_abundance/Objects/SA_unnorm_Bac_ps_l_unfilt.RData")
+
+##For ZINBWAve, remove taxa with a total sum of 0:
+MeJA_unnorm_Bac_ps_l <- lapply(MeJA_unnorm_Bac_ps_l, function(x)
+         prune_taxa(taxa_sums(x) >0,x))
+SA_unnorm_Bac_ps_l <- lapply(SA_unnorm_Bac_ps_l, function(x)
+         prune_taxa(taxa_sums(x) >0,x))
+
+save(MeJA_unnorm_Bac_ps_l,  
+     file = "./05_Differential_abundance/Objects/MeJA_unnorm_Bac_ps_l.RData")
+save(SA_unnorm_Bac_ps_l,  
+     file = "./05_Differential_abundance/Objects/SA_unnorm_Bac_ps_l.RData")
+
+
+#FUNGI
+MeJA_unnorm_Fun_ps <- subset_samples(unnorm_Fun_ps, !Stress %in% SA)
+SA_unnorm_Fun_ps <- subset_samples(unnorm_Fun_ps, !Stress %in% MeJA)
+
+#separate to each plant species
+MeJA_unnorm_Fun_ps_l <- metagMisc::phyloseq_sep_variable(MeJA_unnorm_Fun_ps, variable = "Sp_abb_name")
+SA_unnorm_Fun_ps_l <- metagMisc::phyloseq_sep_variable(SA_unnorm_Fun_ps, variable = "Sp_abb_name")
+
+#Save the unfiltered (with zeroes) object for Standard DESeq
+MeJA_unnorm_Fun_ps_l_unfilt <- MeJA_unnorm_Fun_ps_l
+SA_unnorm_Fun_ps_l_unfilt <- SA_unnorm_Fun_ps_l
+
+save(MeJA_unnorm_Fun_ps_l_unfilt,  
+     file = "./05_Differential_abundance/Objects/MeJA_unnorm_Fun_ps_l_unfilt.RData")
+save(SA_unnorm_Fun_ps_l_unfilt,  
+     file = "./05_Differential_abundance/Objects/SA_unnorm_Fun_ps_l_unfilt.RData")
+
+##For ZINBWAve, remove taxa with a total sum of 0:
+MeJA_unnorm_Fun_ps_l <- lapply(MeJA_unnorm_Fun_ps_l, function(x)
+         prune_taxa(taxa_sums(x) >0,x))
+SA_unnorm_Fun_ps_l <- lapply(SA_unnorm_Fun_ps_l, function(x)
+         prune_taxa(taxa_sums(x) >0,x))
+
+save(MeJA_unnorm_Fun_ps_l,  
+     file = "./05_Differential_abundance/Objects/MeJA_unnorm_Fun_ps_l.RData")
+save(SA_unnorm_Fun_ps_l,  
+     file = "./05_Differential_abundance/Objects/SA_unnorm_Fun_ps_l.RData")
+```
+
+#5.1 DeSeq and ZINBDeSeq
+##5.1.1 Convert phyloseq object to DeSeq object with lists
+```{r}
+#Convert unfiltered object to DESeq object for standard DESeq
+dds_MeJA_Bac_ps_unfilt <- lapply(MeJA_unnorm_Bac_ps_l_unfilt, function(x) phyloseq_to_deseq2(x, ~ Stress))
+save(dds_MeJA_Bac_ps_unfilt, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/dds_MeJA_Bac_ps_unfilt.RData")
+
+dds_SA_Bac_ps_unfilt <- lapply(SA_unnorm_Bac_ps_l_unfilt, function(x) phyloseq_to_deseq2(x, ~ Stress))
+save(dds_SA_Bac_ps_unfilt, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/dds_SA_Bac_ps_unfilt.RData")
+
+dds_MeJA_Fun_ps_unfilt <- lapply(MeJA_unnorm_Fun_ps_l_unfilt, function(x) phyloseq_to_deseq2(x, ~ Stress))
+save(dds_MeJA_Fun_ps_unfilt, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/dds_MeJA_Fun_ps_unfilt.RData")
+
+dds_SA_Fun_ps_unfilt <- lapply(SA_unnorm_Fun_ps_l_unfilt, function(x) phyloseq_to_deseq2(x, ~ Stress))
+save(dds_SA_Fun_ps_unfilt, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/dds_SA_Fun_ps_unfilt.RData")
+
+
+#Convert filtered object to DeSeq object for ZINBWave
+dds_MeJA_Bac_ps <- lapply(MeJA_unnorm_Bac_ps_l, function(x) phyloseq_to_deseq2(x, ~ Stress))
+save(dds_MeJA_Bac_ps, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/dds_MeJA_Bac_ps.RData")
+
+dds_SA_Bac_ps <- lapply(SA_unnorm_Bac_ps_l, function(x) phyloseq_to_deseq2(x, ~ Stress))
+save(dds_SA_Bac_ps, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/dds_SA_Bac_ps.RData")
+
+dds_MeJA_Fun_ps <- lapply(MeJA_unnorm_Fun_ps_l, function(x) phyloseq_to_deseq2(x, ~ Stress))
+save(dds_MeJA_Fun_ps, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/dds_MeJA_Fun_ps.RData")
+
+dds_SA_Fun_ps <- lapply(SA_unnorm_Fun_ps_l, function(x) phyloseq_to_deseq2(x, ~ Stress))
+save(dds_SA_Fun_ps, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/dds_SA_Fun_ps.RData")
+
+```
+
+##5.1.2 DESeq
+```{r}
+#MeJA_Bac
+#Standard DESeq
+stddds2_Wald_MeJA_Bac <- lapply(dds_MeJA_Bac_ps_unfilt, function(x) 
+                  DESeq(x, 
+                  test="Wald",  
+                  minReplicatesForReplace=Inf,
+                  fitType = "local")) 
+
+save(stddds2_Wald_MeJA_Bac, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/stddds2_Wald_MeJA_Bac.RData")
+
+#Dataframe generation
+lfcres_stddds2_Wald_MeJA_Bac <- lapply(stddds2_Wald_MeJA_Bac, function(x) lfcShrink(x,  coef="Stress_MeJA_vs_Control", type="normal"))
+
+save(lfcres_stddds2_Wald_MeJA_Bac, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/lfcres_stddds2_Wald_MeJA_Bac.RData")
+
+#Filter to only p adjusted under alpha
+alpha = 0.05
+sigtab_stddds2_Wald_MeJA_Bac <- lapply(lfcres_stddds2_Wald_MeJA_Bac, function(x) x[which(x$padj < alpha), ])
+
+save(sigtab_stddds2_Wald_MeJA_Bac, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/sigtab_stddds2_Wald_MeJA_Bac.RData")
+
+#SA_Bac
+#DeSeq with Wald test
+stddds2_Wald_SA_Bac <- lapply(dds_SA_Bac_ps_unfilt, function(x) 
+                  DESeq(x, 
+                  test="Wald",  
+                  minReplicatesForReplace=Inf,
+                  fitType = "local")) 
+
+save(stddds2_Wald_SA_Bac, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/stddds2_Wald_SA_Bac.RData")
+
+#Dataframe generation
+lfcres_stddds2_Wald_SA_Bac <- lapply(stddds2_Wald_SA_Bac, function(x) lfcShrink(x,  coef="Stress_SA_vs_Control", type="normal"))
+
+save(lfcres_stddds2_Wald_SA_Bac, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/lfcres_stddds2_Wald_SA_Bac.RData")
+
+#Filter to only p adjusted under alpha
+sigtab_stddds2_Wald_SA_Bac <- lapply(lfcres_stddds2_Wald_SA_Bac, function(x) x[which(x$padj < alpha), ])
+
+save(sigtab_stddds2_Wald_SA_Bac, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/sigtab_stddds2_Wald_SA_Bac.RData")
+
+
+#MeJA_Fun
+#Standard DESeq
+stddds2_Wald_MeJA_Fun <- lapply(dds_MeJA_Fun_ps_unfilt, function(x) 
+                  DESeq(x, 
+                  test="Wald",  
+                  minReplicatesForReplace=Inf,
+                  fitType = "local")) 
+
+save(stddds2_Wald_MeJA_Fun, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/stddds2_Wald_MeJA_Fun.RData")
+
+alpha = 0.05
+
+#Dataframe generation
+lfcres_stddds2_Wald_MeJA_Fun <- lapply(stddds2_Wald_MeJA_Fun, function(x) lfcShrink(x,  coef="Stress_MeJA_vs_Control", type="normal"))
+
+save(lfcres_stddds2_Wald_MeJA_Fun, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/lfcres_stddds2_Wald_MeJA_Fun.RData")
+
+#Filter to only p adjusted under alpha
+alpha = 0.05
+sigtab_stddds2_Wald_MeJA_Fun <- lapply(lfcres_stddds2_Wald_MeJA_Fun, function(x) x[which(x$padj < alpha), ])
+
+save(sigtab_stddds2_Wald_MeJA_Fun, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/sigtab_stddds2_Wald_MeJA_Fun.RData")
+
+
+
+#SA_Fun
+#Standard DESeq
+stddds2_Wald_SA_Fun <- lapply(dds_SA_Fun_ps_unfilt, function(x) 
+                  DESeq(x, 
+                  test="Wald",  
+                  minReplicatesForReplace=Inf,
+                  fitType = "local")) 
+
+save(stddds2_Wald_SA_Fun, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/stddds2_Wald_SA_Fun.RData")
+
+alpha = 0.05
+
+#Dataframe generation
+lfcres_stddds2_Wald_SA_Fun <- lapply(stddds2_Wald_SA_Fun, function(x) lfcShrink(x,  coef="Stress_SA_vs_Control", type="normal"))
+
+save(lfcres_stddds2_Wald_SA_Fun, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/lfcres_stddds2_Wald_SA_Fun.RData")
+
+#Filter to only p adjusted under alpha
+alpha = 0.05
+sigtab_stddds2_Wald_SA_Fun <- lapply(lfcres_stddds2_Wald_SA_Fun, function(x) x[which(x$padj < alpha), ])
+
+save(sigtab_stddds2_Wald_SA_Fun, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/sigtab_stddds2_Wald_SA_Fun.RData")
+
+```
+
+##5.1.3 ZINBDESeq
+####5.1.3.1 Calculate weights
+```{r}
+#library("scran") DESeq can compute the size factors already from the weights output of zinbwave
+library(zinbwave)
+
+#Calculate observational weights with ZINBwave
+
+#MeJA_Bac
+zw_MeJA_Bac <- lapply(dds_MeJA_Bac_ps, function(x)
+                                zinbwave(x,
+                               epsilon = 1e10,
+                               verbose = TRUE,
+                               K = 0,
+                               observationalWeights = TRUE,
+                               BPPARAM = BiocParallel::SerialParam()))
+
+save(zw_MeJA_Bac, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/zw_MeJA_Bac.RData")
+
+#Check that weights have been calculated for each assay in each smaple
+assay(zw_MeJA_Bac$At, "weights")[1:20, 1:20]
+
+#SA_Bac
+zw_SA_Bac <- lapply(dds_SA_Bac_ps, function(x)
+                                zinbwave(x,
+                               epsilon = 1e10,
+                               verbose = TRUE,
+                               K = 0,
+                               observationalWeights = TRUE,
+                               BPPARAM = BiocParallel::SerialParam()))
+save(zw_SA_Bac, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/zw_SA_Bac.RData")
+
+ 
+#MeJA_Fun
+zw_MeJA_Fun <- lapply(dds_MeJA_Fun_ps, function(x)
+                                zinbwave(x,
+                               epsilon = 1e10,
+                               verbose = TRUE,
+                               K = 0,
+                               observationalWeights = TRUE,
+                               BPPARAM = BiocParallel::SerialParam()))
+
+save(zw_MeJA_Fun, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/zw_MeJA_Fun.RData")
+
+
+
+#SA_Fun
+zw_SA_Fun <- lapply(dds_SA_Fun_ps, function(x)
+                                zinbwave(x,
+                               epsilon = 1e10,
+                               verbose = TRUE,
+                               K = 0,
+                               observationalWeights = TRUE,
+                               BPPARAM = BiocParallel::SerialParam()))
+
+save(zw_SA_Fun, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/zw_SA_Fun.RData")
+
+```
+ 
+
+####5.1.3.2 Estimate size factors and run DeSeq
+```{r}
+load("./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/zw_MeJA_Bac.RData")
+load("./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/zw_SA_Bac.RData")
+load("./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/zw_MeJA_Fun.RData")
+load("./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/zw_SA_Fun.RData")
+
+#MeJA_Bac
+#Compute size factors with DeSeq
+dds2_zw_MeJA_Bac <- lapply(zw_MeJA_Bac, 
+                          function(x) DESeqDataSet(x, design = ~ Stress))
+dds2_zw_MeJA_Bac <- lapply(dds2_zw_MeJA_Bac, 
+                            function(x) estimateSizeFactors(x, type="poscounts"))
+save(dds2_zw_MeJA_Bac, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/dds2_zw_MeJA_Bac.RData")
+
+#DeSeq with LRT test
+dds2_LRT_zinb_MeJA_Bac <- lapply(dds2_zw_MeJA_Bac, function(x) 
+                  DESeq(x, 
+                  test="LRT", 
+                  reduced=~1,
+                  sfType="poscounts", 
+                  minmu=1e-6, 
+                  minReplicatesForReplace=Inf,
+                  fitType = "local"))
+
+save(dds2_LRT_zinb_MeJA_Bac, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/dds2_LRT_zinb_MeJA_Bac.RData")
+
+#DeSeq with Wald test test
+dds2_Wald_zinb_MeJA_Bac <- lapply(dds2_zw_MeJA_Bac, function(x) 
+                  DESeq(x, 
+                  test="Wald",
+                  sfType="poscounts",
+                  useT=TRUE,
+                  minmu=1e-6, 
+                  minReplicatesForReplace=Inf,
+                  fitType = "local")) 
+
+save(dds2_Wald_zinb_MeJA_Bac, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/dds2_Wald_zinb_MeJA_Bac.RData")
+
+
+#SA_Bac
+#Compute size factors with DeSeq
+dds2_zw_SA_Bac <- lapply(zw_SA_Bac, 
+                          function(x) DESeqDataSet(x, design = ~ Stress))
+dds2_zw_SA_Bac <- lapply(dds2_zw_SA_Bac, 
+                            function(x) estimateSizeFactors(x, type="poscounts"))
+
+save(dds2_zw_SA_Bac, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/dds2_zw_SA_Bac.RData")
+
+#DeSeq with LRT test
+dds2_LRT_zinb_SA_Bac <- lapply(dds2_zw_SA_Bac, function(x) 
+                  DESeq(x, 
+                  test="LRT", 
+                  reduced=~1,
+                  sfType="poscounts", 
+                  minmu=1e-6, 
+                  minReplicatesForReplace=Inf,
+                  fitType = "local")) 
+
+save(dds2_LRT_zinb_SA_Bac, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/dds2_LRT_zinb_SA_Bac.RData")
+
+#DeSeq with Wald test
+dds2_Wald_zinb_SA_Bac <- lapply(dds2_zw_SA_Bac, function(x) 
+                  DESeq(x, 
+                  test="Wald",
+                  sfType="poscounts",
+                  useT=TRUE,
+                  minmu=1e-6, 
+                  minReplicatesForReplace=Inf,
+                  fitType = "local")) 
+
+save(dds2_Wald_zinb_SA_Bac, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/dds2_Wald_zinb_MeJA_Bac.RData")
+
+#MeJA_Fun
+#Compute size factors with DeSeq
+dds2_zw_MeJA_Fun <- lapply(zw_MeJA_Fun, 
+                          function(x) DESeqDataSet(x, design = ~ Stress))
+dds2_zw_MeJA_Fun <- lapply(dds2_zw_MeJA_Fun, 
+                            function(x) estimateSizeFactors(x, type="poscounts"))
+save(dds2_zw_MeJA_Fun, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/dds2_zw_MeJA_Fun.RData")
+
+#DeSeq with LRT test
+dds2_LRT_zinb_MeJA_Fun <- lapply(dds2_zw_MeJA_Fun, function(x) 
+                  DESeq(x, 
+                  test="LRT", 
+                  reduced=~1,
+                  sfType="poscounts", 
+                  minmu=1e-6, 
+                  minReplicatesForReplace=Inf,
+                  fitType = "local"))
+
+save(dds2_LRT_zinb_MeJA_Fun, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/dds2_LRT_zinb_MeJA_Fun.RData")
+
+#DeSeq with Wald test test
+dds2_Wald_zinb_MeJA_Fun <- lapply(dds2_zw_MeJA_Fun, function(x) 
+                  DESeq(x, 
+                  test="Wald",
+                  sfType="poscounts",
+                  useT=TRUE,
+                  minmu=1e-6, 
+                  minReplicatesForReplace=Inf,
+                  fitType = "local")) 
+
+save(dds2_Wald_zinb_MeJA_Fun, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/dds2_Wald_zinb_MeJA_Fun.RData")
+
+#SA_Fun
+#Compute size factors with DeSeq
+dds2_zw_SA_Fun <- lapply(zw_SA_Fun, 
+                          function(x) DESeqDataSet(x, design = ~ Stress))
+dds2_zw_SA_Fun <- lapply(dds2_zw_SA_Fun, 
+                            function(x) estimateSizeFactors(x, type="poscounts"))
+save(dds2_zw_SA_Fun, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/dds2_zw_SA_Fun.RData")
+
+#DeSeq with LRT test
+dds2_LRT_zinb_SA_Fun <- lapply(dds2_zw_SA_Fun, function(x) 
+                  DESeq(x, 
+                  test="LRT", 
+                  reduced=~1,
+                  sfType="poscounts", 
+                  minmu=1e-6, 
+                  minReplicatesForReplace=Inf,
+                  fitType = "local"))
+
+save(dds2_LRT_zinb_SA_Fun, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/dds2_LRT_zinb_SA_Fun.RData")
+
+#DeSeq with Wald test test
+dds2_Wald_zinb_SA_Fun <- lapply(dds2_zw_SA_Fun, function(x) 
+                  DESeq(x, 
+                  test="Wald",
+                  sfType="poscounts",
+                  useT=TRUE,
+                  minmu=1e-6, 
+                  minReplicatesForReplace=Inf,
+                  fitType = "local")) 
+
+save(dds2_Wald_zinb_SA_Fun, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/dds2_Wald_zinb_SA_Fun.RData")
+
+```
+
+####5.1.3.3 Dataframe generation
+```{r}
+alpha = 0.05
+#MeJA_Bac
+##LRT
+res_zinbLRT_MeJA_Bac <- lapply(dds2_LRT_zinb_MeJA_Bac, function(x) results(x, contrast = c("Stress", "MeJA", "Control")))
+save(res_zinbLRT_MeJA_Bac, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/res_zinbLRT_MeJA_Bac.RData")
+#Filter to only p adjusted under alpha
+sigtab_zinbLRT_MeJA_Bac <- lapply(res_zinbLRT_MeJA_Bac, function(x) x[which(x$padj < alpha), ])
+save(sigtab_zinbLRT_MeJA_Bac, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/sigtab_zinbLRT_MeJA_Bac.RData")
+
+##Wald
+res_zinbWald_MeJA_Bac <- lapply(dds2_Wald_zinb_MeJA_Bac, function(x) results(x, contrast = c("Stress", "MeJA", "Control")))
+save(res_zinbWald_MeJA_Bac, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/res_zinbWald_MeJA_Bac.RData")
+#Filter to only p adjusted under alpha
+sigtab_zinbWald_MeJA_Bac <- lapply(res_zinbWald_MeJA_Bac, function(x) x[which(x$padj < alpha), ])
+save(sigtab_zinbWald_MeJA_Bac, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/sigtab_zinbWald_MeJA_Bac.RData")
+
+#SA_Bac
+##LRT
+res_zinbLRT_SA_Bac <- lapply(dds2_LRT_zinb_SA_Bac, function(x) results(x, contrast = c("Stress", "SA", "Control")))
+save(res_zinbLRT_SA_Bac, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/res_zinbLRT_SA_Bac.RData")
+#Filter to only p adjusted under alpha
+sigtab_zinbLRT_SA_Bac <- lapply(res_zinbLRT_SA_Bac, function(x) x[which(x$padj < alpha), ])
+save(sigtab_zinbLRT_SA_Bac, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/sigtab_zinbLRT_SA_Bac.RData")
+
+##Wald
+res_zinbWald_SA_Bac <- lapply(dds2_Wald_zinb_SA_Bac, function(x) results(x, contrast = c("Stress", "SA", "Control")))
+save(res_zinbWald_SA_Bac, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/res_zinbWald_SA_Bac.RData")
+#Filter to only p adjusted under alpha
+sigtab_zinbWald_SA_Bac <- lapply(res_zinbWald_SA_Bac, function(x) x[which(x$padj < alpha), ])
+save(sigtab_zinbWald_SA_Bac, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/sigtab_zinbWald_SA_Bac.RData")
+
+#MeJA_Fun
+##LRT
+res_zinbLRT_MeJA_Fun <- lapply(dds2_LRT_zinb_MeJA_Fun, function(x) results(x, contrast = c("Stress", "MeJA", "Control")))
+save(res_zinbLRT_MeJA_Fun, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/res_zinbLRT_MeJA_Fun.RData")
+#Filter to only p adjusted under alpha
+sigtab_zinbLRT_MeJA_Fun <- lapply(res_zinbLRT_MeJA_Fun, function(x) x[which(x$padj < alpha), ])
+save(sigtab_zinbLRT_MeJA_Fun, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/sigtab_zinbLRT_MeJA_Fun.RData")
+
+##Wald
+res_zinbWald_MeJA_Fun <- lapply(dds2_Wald_zinb_MeJA_Fun, function(x) results(x, contrast = c("Stress", "MeJA", "Control")))
+save(res_zinbWald_MeJA_Fun, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/res_zinbWald_MeJA_Fun.RData")
+#Filter to only p adjusted under alpha
+sigtab_zinbWald_MeJA_Fun <- lapply(res_zinbWald_MeJA_Fun, function(x) x[which(x$padj < alpha), ])
+save(sigtab_zinbWald_MeJA_Fun, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/sigtab_zinbWald_MeJA_Fun.RData")
+
+#SA_Fun
+##LRT
+res_zinbLRT_SA_Fun <- lapply(dds2_LRT_zinb_SA_Fun, function(x) results(x, contrast = c("Stress", "SA", "Control")))
+save(res_zinbLRT_SA_Fun, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/res_zinbLRT_SA_Fun.RData")
+#Filter to only p adjusted under alpha
+sigtab_zinbLRT_SA_Fun <- lapply(res_zinbLRT_SA_Fun, function(x) x[which(x$padj < alpha), ])
+save(sigtab_zinbLRT_SA_Fun, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/sigtab_zinbLRT_SA_Fun.RData")
+
+##Wald
+res_zinbWald_SA_Fun <- lapply(dds2_Wald_zinb_SA_Fun, function(x) results(x, contrast = c("Stress", "SA", "Control")))
+save(res_zinbWald_SA_Fun, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/res_zinbWald_SA_Fun.RData")
+#Filter to only p adjusted under alpha
+sigtab_zinbWald_SA_Fun <- lapply(res_zinbWald_SA_Fun, function(x) x[which(x$padj < alpha), ])
+save(sigtab_zinbWald_SA_Fun, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/sigtab_zinbWald_SA_Fun.RData")
+
+```
+
+
+#5.2 ANCOM-BC
+##5.2.1 ANCOM including structural zeroes detection
+```{r}
+library(ANCOMBC)
+
+#Bac_MeJA
+ancomWZ_Bac_MeJA <- lapply(MeJA_unnorm_Bac_ps_l, function (x)
+                            ancombc(phyloseq = x, 
+                             formula = "Stress", 
+                             p_adj_method = "fdr", 
+                             zero_cut = 0.90, 
+                             lib_cut = 0, 
+                             group = "Stress", 
+                             struc_zero = TRUE, 
+                             neg_lb = TRUE, 
+                             tol = 1e-5,               
+                             max_iter = 100, 
+                             conserve = TRUE, 
+                             alpha = 0.05, 
+                             global = FALSE))
+
+
+save(ancomWZ_Bac_MeJA, 
+     file = "./05_Differential_abundance/Objects/5.2ANCOM/ancomWZ_Bac_MeJA.RData")
+
+#Bac_SA
+ancomWZ_Bac_SA<- lapply(SA_unnorm_Bac_ps_l, function (x)
+                            ancombc(phyloseq = x, 
+                             formula = "Stress", 
+                             p_adj_method = "fdr", 
+                             zero_cut = 0.90, 
+                             lib_cut = 0, 
+                             group = "Stress", 
+                             struc_zero = TRUE, 
+                             neg_lb = TRUE, 
+                             tol = 1e-5,               
+                             max_iter = 100, 
+                             conserve = TRUE, 
+                             alpha = 0.05, 
+                             global = FALSE))
+
+
+save(ancomWZ_Bac_SA, 
+     file = "./05_Differential_abundance/Objects/5.2ANCOM/ancomWZ_Bac_SA.RData")
+
+
+
+#Fun_MeJA
+load("./05_Differential_abundance/Objects/MeJA_unnorm_Fun_ps_l.RData")
+ancomWZ_Fun_MeJA <- lapply(MeJA_unnorm_Fun_ps_l, function (x)
+                            ancombc(phyloseq = x, 
+                             formula = "Stress", 
+                             p_adj_method = "fdr", 
+                             zero_cut = 0.90, 
+                             lib_cut = 0, 
+                             group = "Stress", 
+                             struc_zero = TRUE, 
+                             neg_lb = TRUE, 
+                             tol = 1e-5,               
+                             max_iter = 100, 
+                             conserve = TRUE, 
+                             alpha = 0.05, 
+                             global = FALSE))
+
+
+save(ancomWZ_Fun_MeJA, 
+     file = "./05_Differential_abundance/Objects/5.2ANCOM/ancomWZ_Fun_MeJA.RData")
+
+#Fun_SA
+load("./05_Differential_abundance/Objects/SA_unnorm_Fun_ps_l.RData")
+ancomWZ_Fun_SA<- lapply(SA_unnorm_Fun_ps_l, function (x)
+                            ancombc(phyloseq = x, 
+                             formula = "Stress", 
+                             p_adj_method = "fdr", 
+                             zero_cut = 0.90, 
+                             lib_cut = 0, 
+                             group = "Stress", 
+                             struc_zero = TRUE, 
+                             neg_lb = TRUE, 
+                             tol = 1e-5,               
+                             max_iter = 100, 
+                             conserve = TRUE, 
+                             alpha = 0.05, 
+                             global = FALSE))
+
+
+save(ancomWZ_Fun_SA, 
+     file = "./05_Differential_abundance/Objects/5.2ANCOM/ancomWZ_Fun_SA.RData")
+
+#Organize and filter results
+##MeJA_Bac
+ancomWZ_res_df_MeJA_Bac <- lapply(ancomWZ_Bac_MeJA, function (x)
+  data.frame(
+  Species = row.names(x$res$beta),
+  beta = unlist(x$res$beta),
+  se = unlist(x$res$se),
+  W = unlist(x$res$W),
+  p_val = unlist(x$res$p_val),
+  q_val = unlist(x$res$q_val),
+  diff_abn = unlist(x$res$diff_abn)))
+
+fdr_ancom_MeJA_Bac <- lapply(ancomWZ_res_df_MeJA_Bac, function(x)
+  (x %>%
+  dplyr::filter(q_val < 0.05)))
+
+head(fdr_ancom_MeJA_Bac)
+
+##SA_Bac
+ancomWZ_res_df_SA_Bac <- lapply(ancomWZ_Bac_SA, function (x)
+  data.frame(
+  Species = row.names(x$res$beta),
+  beta = unlist(x$res$beta),
+  se = unlist(x$res$se),
+  W = unlist(x$res$W),
+  p_val = unlist(x$res$p_val),
+  q_val = unlist(x$res$q_val),
+  diff_abn = unlist(x$res$diff_abn)))
+
+fdr_ancom_SA_Bac <- lapply(ancomWZ_res_df_SA_Bac, function(x)
+  (x %>%
+  dplyr::filter(q_val < 0.05)))
+
+
+
+save(fdr_ancom_MeJA_Bac, 
+     file = "./05_Differential_abundance/Objects/5.2ANCOM/fdr_ancomWZ_MeJA_Bac.RData")
+save(fdr_ancom_SA_Bac, 
+     file = "./05_Differential_abundance/Objects/5.2ANCOM/fdr_ancomWZ_SA_Bac.RData")
+
+#Organize and filter results
+##MeJA_Fun
+ancomWZ_res_df_MeJA_Fun <- lapply(ancomWZ_Fun_MeJA, function (x)
+  data.frame(
+  Species = row.names(x$res$beta),
+  beta = unlist(x$res$beta),
+  se = unlist(x$res$se),
+  W = unlist(x$res$W),
+  p_val = unlist(x$res$p_val),
+  q_val = unlist(x$res$q_val),
+  diff_abn = unlist(x$res$diff_abn)))
+
+fdr_ancom_MeJA_Fun <- lapply(ancomWZ_res_df_MeJA_Fun, function(x)
+  (x %>%
+  dplyr::filter(q_val < 0.05)))
+
+##SA_Fun
+ancomWZ_res_df_SA_Fun <- lapply(ancomWZ_Fun_SA, function (x)
+  data.frame(
+  Species = row.names(x$res$beta),
+  beta = unlist(x$res$beta),
+  se = unlist(x$res$se),
+  W = unlist(x$res$W),
+  p_val = unlist(x$res$p_val),
+  q_val = unlist(x$res$q_val),
+  diff_abn = unlist(x$res$diff_abn)))
+
+fdr_ancom_SA_Fun <- lapply(ancomWZ_res_df_SA_Fun, function(x)
+  (x %>%
+  dplyr::filter(q_val < 0.05)))
+
+
+
+save(fdr_ancom_MeJA_Fun, 
+     file = "./05_Differential_abundance/Objects/5.2ANCOM/fdr_ancomWZ_MeJA_Fun.RData")
+save(fdr_ancom_SA_Fun, 
+     file = "./05_Differential_abundance/Objects/5.2ANCOM/fdr_ancomWZ_SA_Fun.RData")
+
+
+```
+
+##5.2.1 ANCOM WITHOUT structural zeroes detection
+```{r}
+load("./05_Differential_abundance/Objects/MeJA_unnorm_Bac_ps_l.RData")
+load("./05_Differential_abundance/Objects/SA_unnorm_Bac_ps_l.RData")
+
+#Bac_MeJA
+ancomNoZ_Bac_MeJA <- lapply(MeJA_unnorm_Bac_ps_l, function (x)
+                            ancombc(phyloseq = x, 
+                             formula = "Stress", 
+                             p_adj_method = "fdr", 
+                             zero_cut = 0.90, 
+                             lib_cut = 0, 
+                             group = "Stress", 
+                             struc_zero = FALSE, 
+                             neg_lb = TRUE, 
+                             tol = 1e-5,               
+                             max_iter = 100, 
+                             conserve = TRUE, 
+                             alpha = 0.05, 
+                             global = FALSE))
+save(ancomNoZ_Bac_MeJA, 
+     file = "./05_Differential_abundance/Objects/5.2ANCOM/ancomNoZ_Bac_MeJA.RData")
+
+
+#Bac_SA
+ancomNoZ_Bac_SA <- lapply(SA_unnorm_Bac_ps_l, function (x)
+                            ancombc(phyloseq = x, 
+                             formula = "Stress", 
+                             p_adj_method = "fdr", 
+                             zero_cut = 0.90, 
+                             lib_cut = 0, 
+                             group = "Stress", 
+                             struc_zero = FALSE, 
+                             neg_lb = TRUE, 
+                             tol = 1e-5,               
+                             max_iter = 100, 
+                             conserve = TRUE, 
+                             alpha = 0.05, 
+                             global = FALSE))
+
+
+save(ancomNoZ_Bac_SA, 
+     file = "./05_Differential_abundance/Objects/5.2ANCOM/ancomNoZ_Bac_SA.RData")
+
+
+#Fun_MeJA
+ancomNoZ_Fun_MeJA <- lapply(MeJA_unnorm_Fun_ps_l, function (x)
+                            ancombc(phyloseq = x, 
+                             formula = "Stress", 
+                             p_adj_method = "fdr", 
+                             zero_cut = 0.90, 
+                             lib_cut = 0, 
+                             group = "Stress", 
+                             struc_zero = FALSE, 
+                             neg_lb = TRUE, 
+                             tol = 1e-5,               
+                             max_iter = 100, 
+                             conserve = TRUE, 
+                             alpha = 0.05, 
+                             global = FALSE))
+save(ancomNoZ_Fun_MeJA, 
+     file = "./05_Differential_abundance/Objects/5.2ANCOM/ancomNoZ_Fun_MeJA.RData")
+
+
+#Fun_SA
+ancomNoZ_Fun_SA <- lapply(SA_unnorm_Fun_ps_l, function (x)
+                            ancombc(phyloseq = x, 
+                             formula = "Stress", 
+                             p_adj_method = "fdr", 
+                             zero_cut = 0.90, 
+                             lib_cut = 0, 
+                             group = "Stress", 
+                             struc_zero = FALSE, 
+                             neg_lb = TRUE, 
+                             tol = 1e-5,               
+                             max_iter = 100, 
+                             conserve = TRUE, 
+                             alpha = 0.05, 
+                             global = FALSE))
+
+
+save(ancomNoZ_Fun_SA, 
+     file = "./05_Differential_abundance/Objects/5.2ANCOM/ancomNoZ_Fun_SA.RData")
+
+
+
+#Organize and filter results
+##MeJA_Bac
+ancomNoZ_res_df_MeJA_Bac <- lapply(ancomNoZ_Bac_MeJA, function (x)
+  data.frame(
+  Species = row.names(x$res$beta),
+  beta = unlist(x$res$beta),
+  se = unlist(x$res$se),
+  W = unlist(x$res$W),
+  p_val = unlist(x$res$p_val),
+  q_val = unlist(x$res$q_val),
+  diff_abn = unlist(x$res$diff_abn)))
+
+fdr_ancomNoZ_MeJA_Bac <- lapply(ancomNoZ_res_df_MeJA_Bac, function(x)
+  (x %>%
+  dplyr::filter(q_val < 0.05)))
+
+head(fdr_ancomNoZ_MeJA_Bac)
+
+##SA_Bac
+ancomNoZ_res_df_SA_Bac <- lapply(ancomNoZ_Bac_SA, function (x)
+  data.frame(
+  Species = row.names(x$res$beta),
+  beta = unlist(x$res$beta),
+  se = unlist(x$res$se),
+  W = unlist(x$res$W),
+  p_val = unlist(x$res$p_val),
+  q_val = unlist(x$res$q_val),
+  diff_abn = unlist(x$res$diff_abn)))
+
+fdr_ancomNoZ_SA_Bac <- lapply(ancomNoZ_res_df_SA_Bac, function(x)
+  (x %>%
+  dplyr::filter(q_val < 0.05)))
+
+
+save(fdr_ancomNoZ_MeJA_Bac, 
+     file = "./05_Differential_abundance/Objects/5.2ANCOM/fdr_ancomNoZ_MeJA_Bac.RData")
+save(fdr_ancomNoZ_SA_Bac, 
+     file = "./05_Differential_abundance/Objects/5.2ANCOM/fdr_ancomNoZ_SA_Bac.RData")
+
+#Organize and filter results
+##MeJA_Fun
+ancomNoZ_res_df_MeJA_Fun <- lapply(ancomNoZ_Fun_MeJA, function (x)
+  data.frame(
+  Species = row.names(x$res$beta),
+  beta = unlist(x$res$beta),
+  se = unlist(x$res$se),
+  W = unlist(x$res$W),
+  p_val = unlist(x$res$p_val),
+  q_val = unlist(x$res$q_val),
+  diff_abn = unlist(x$res$diff_abn)))
+
+fdr_ancomNoZ_MeJA_Fun <- lapply(ancomNoZ_res_df_MeJA_Fun, function(x)
+  (x %>%
+  dplyr::filter(q_val < 0.05)))
+
+head(fdr_ancomNoZ_MeJA_Fun)
+
+##SA_Fun
+ancomNoZ_res_df_SA_Fun <- lapply(ancomNoZ_Fun_SA, function (x)
+  data.frame(
+  Species = row.names(x$res$beta),
+  beta = unlist(x$res$beta),
+  se = unlist(x$res$se),
+  W = unlist(x$res$W),
+  p_val = unlist(x$res$p_val),
+  q_val = unlist(x$res$q_val),
+  diff_abn = unlist(x$res$diff_abn)))
+
+fdr_ancomNoZ_SA_Fun <- lapply(ancomNoZ_res_df_SA_Fun, function(x)
+  (x %>%
+  dplyr::filter(q_val < 0.05)))
+
+
+save(fdr_ancomNoZ_MeJA_Fun, 
+     file = "./05_Differential_abundance/Objects/5.2ANCOM/fdr_ancomNoZ_MeJA_Fun.RData")
+save(fdr_ancomNoZ_SA_Fun, 
+     file = "./05_Differential_abundance/Objects/5.2ANCOM/fdr_ancomNoZ_SA_Fun.RData")
+
+```
+
+#5.3 Summarizing results
+##5.3.1 Create lists of ASVs detected per treatment/dataset
+```{r}
+#MeJA_Bac
+##Load outputs from each test
+load("./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/sigtab_stddds2_Wald_MeJA_Bac.RData")
+load("./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/sigtab_zinbLRT_MeJA_Bac.RData")
+load("./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/sigtab_zinbWald_MeJA_Bac.RData")
+load("./05_Differential_abundance/Objects/5.2ANCOM/fdr_ancomWZ_MeJA_Bac.RData")
+load("./05_Differential_abundance/Objects/5.2ANCOM/fdr_ancomNoZ_MeJA_Bac.RData")
+
+##From each dataframe, extract the ASVIDs caught by each test
+MeJA_Bac_DESeqWald_ASVs <- lapply(sigtab_stddds2_Wald_MeJA_Bac, function(x) rownames(x))
+MeJA_Bac_zinbLRT_ASVs <- lapply(sigtab_zinbLRT_MeJA_Bac, function(x) rownames(x))
+MeJA_Bac_zinbWald_ASVs <- lapply(sigtab_zinbWald_MeJA_Bac, function(x) rownames(x))
+MeJA_Bac_ancomWZ_ASVs <- lapply(fdr_ancom_MeJA_Bac, function(x) as.vector(x[,'Species']))
+MeJA_Bac_ancomNoZ_ASVs <- lapply(fdr_ancomNoZ_MeJA_Bac, function(x) as.vector(x[,'Species']))
+
+#Within each plant concatenate the identified asvs
+#MeJA_Bac
+MeJA_Bac_conca <- mapply(function(t,w,x,y,z){
+  input<-c(t,w,x,y,z)
+  },
+  t = MeJA_Bac_DESeqWald_ASVs,
+  w = MeJA_Bac_zinbLRT_ASVs,
+  x = MeJA_Bac_zinbWald_ASVs,
+  y = MeJA_Bac_ancomWZ_ASVs,
+  z = MeJA_Bac_ancomNoZ_ASVs,
+  SIMPLIFY = FALSE)
+
+save(MeJA_Bac_conca, 
+     file = "./05_Differential_abundance/Objects/MeJA_Bac_conca.RData")
+
+#Remove duplicated asvs names from that list
+MeJA_Bac_conca_nodup <- lapply(MeJA_Bac_conca, function(x)
+  unique(x))
+
+save(MeJA_Bac_conca_nodup, 
+     file = "./05_Differential_abundance/Objects/MeJA_Bac_conca_nodup.RData")
+
+#Filter to ASVs detected by at least 2 tests
+MeJA_Bac_conca_two <- lapply(MeJA_Bac_conca, function(x) 
+  x[duplicated(x)])
+MeJA_Bac_conca_two_f <- lapply(MeJA_Bac_conca_two, function(x) 
+  x[!duplicated(x)])
+
+save(MeJA_Bac_conca_two_f, 
+     file = "./05_Differential_abundance/Objects/MeJA_Bac_conca_two_f.RData")
+
+
+
+#SA_Bac
+##Load outputs from each test
+load("./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/sigtab_stddds2_Wald_SA_Bac.RData")
+load("./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/sigtab_zinbLRT_SA_Bac.RData")
+load("./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/sigtab_zinbWald_SA_Bac.RData")
+load("./05_Differential_abundance/Objects/5.2ANCOM/fdr_ancomWZ_SA_Bac.RData")
+load("./05_Differential_abundance/Objects/5.2ANCOM/fdr_ancomNoZ_SA_Bac.RData")
+
+##From each dataframe, extract the ASVIDs caught by each test
+SA_Bac_DESeqWald_ASVs <- lapply(sigtab_stddds2_Wald_SA_Bac, function(x) rownames(x))
+SA_Bac_zinbLRT_ASVs <- lapply(sigtab_zinbLRT_SA_Bac, function(x) rownames(x))
+SA_Bac_zinbWald_ASVs <- lapply(sigtab_zinbWald_SA_Bac, function(x) rownames(x))
+SA_Bac_ancomWZ_ASVs <- lapply(fdr_ancom_SA_Bac, function(x) as.vector(x[,'Species']))
+SA_Bac_ancomNoZ_ASVs <- lapply(fdr_ancomNoZ_SA_Bac, function(x) as.vector(x[,'Species']))
+
+#Within each plant concatenate the identified asvs
+#SA_Bac
+SA_Bac_conca <- mapply(function(t,w,x,y,z){
+  input<-c(t,w,x,y,z)
+  },
+  t = SA_Bac_DESeqWald_ASVs,
+  w = SA_Bac_zinbLRT_ASVs,
+  x = SA_Bac_zinbWald_ASVs,
+  y = SA_Bac_ancomWZ_ASVs,
+  z = SA_Bac_ancomNoZ_ASVs,
+  SIMPLIFY = FALSE)
+
+save(SA_Bac_conca, 
+     file = "./05_Differential_abundance/Objects/SA_Bac_conca.RData")
+
+#Remove duplicated asvs names from that list
+SA_Bac_conca_nodup <- lapply(SA_Bac_conca, function(x)
+  unique(x))
+
+save(SA_Bac_conca_nodup, 
+     file = "./05_Differential_abundance/Objects/SA_Bac_conca_nodup.RData")
+
+#Filter to ASVs detected by at least 2 tests
+SA_Bac_conca_two <- lapply(SA_Bac_conca, function(x) 
+  x[duplicated(x)])
+SA_Bac_conca_two_f <- lapply(SA_Bac_conca_two, function(x) 
+  x[!duplicated(x)])
+
+save(SA_Bac_conca_two_f, 
+     file = "./05_Differential_abundance/Objects/SA_Bac_conca_two_f.RData")
+
+
+#MeJA_Fun
+##Load outputs from each test
+load("./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/sigtab_stddds2_Wald_MeJA_Fun.RData")
+load("./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/sigtab_zinbLRT_MeJA_Fun.RData")
+load("./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/sigtab_zinbWald_MeJA_Fun.RData")
+load("./05_Differential_abundance/Objects/5.2ANCOM/fdr_ancomWZ_MeJA_Fun.RData")
+load("./05_Differential_abundance/Objects/5.2ANCOM/fdr_ancomNoZ_MeJA_Fun.RData")
+
+##From each dataframe, extract the ASVIDs caught by each test
+MeJA_Fun_DESeqWald_ASVs <- lapply(sigtab_stddds2_Wald_MeJA_Fun, function(x) rownames(x))
+MeJA_Fun_zinbLRT_ASVs <- lapply(sigtab_zinbLRT_MeJA_Fun, function(x) rownames(x))
+MeJA_Fun_zinbWald_ASVs <- lapply(sigtab_zinbWald_MeJA_Fun, function(x) rownames(x))
+MeJA_Fun_ancomWZ_ASVs <- lapply(fdr_ancom_MeJA_Fun, function(x) as.vector(x[,'Species']))
+MeJA_Fun_ancomNoZ_ASVs <- lapply(fdr_ancomNoZ_MeJA_Fun, function(x) as.vector(x[,'Species']))
+
+#Within each plant concatenate the identified asvs
+#MeJA_Fun
+MeJA_Fun_conca <- mapply(function(t,w,x,y,z){
+  input<-c(t,w,x,y,z)
+  },
+  t = MeJA_Fun_DESeqWald_ASVs,
+  w = MeJA_Fun_zinbLRT_ASVs,
+  x = MeJA_Fun_zinbWald_ASVs,
+  y = MeJA_Fun_ancomWZ_ASVs,
+  z = MeJA_Fun_ancomNoZ_ASVs,
+  SIMPLIFY = FALSE)
+
+save(MeJA_Fun_conca, 
+     file = "./05_Differential_abundance/Objects/MeJA_Fun_conca.RData")
+
+#Remove duplicated asvs names from that list
+MeJA_Fun_conca_nodup <- lapply(MeJA_Fun_conca, function(x)
+  unique(x))
+
+save(MeJA_Fun_conca_nodup, 
+     file = "./05_Differential_abundance/Objects/MeJA_Fun_conca_nodup.RData")
+
+#Filter to ASVs detected by at least 2 tests
+MeJA_Fun_conca_two <- lapply(MeJA_Fun_conca, function(x) 
+  x[duplicated(x)])
+MeJA_Fun_conca_two_f <- lapply(MeJA_Fun_conca_two, function(x) 
+  x[!duplicated(x)])
+
+save(MeJA_Fun_conca_two_f, 
+     file = "./05_Differential_abundance/Objects/MeJA_Fun_conca_two_f.RData")
+
+#SA_Fun
+##Load outputs from each test
+load("./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/sigtab_stddds2_Wald_SA_Fun.RData")
+load("./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/sigtab_zinbLRT_SA_Fun.RData")
+load("./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/sigtab_zinbWald_SA_Fun.RData")
+load("./05_Differential_abundance/Objects/5.2ANCOM/fdr_ancomWZ_SA_Fun.RData")
+load("./05_Differential_abundance/Objects/5.2ANCOM/fdr_ancomNoZ_SA_Fun.RData")
+
+##From each dataframe, extract the ASVIDs caught by each test
+SA_Fun_DESeqWald_ASVs <- lapply(sigtab_stddds2_Wald_SA_Fun, function(x) rownames(x))
+SA_Fun_zinbLRT_ASVs <- lapply(sigtab_zinbLRT_SA_Fun, function(x) rownames(x))
+SA_Fun_zinbWald_ASVs <- lapply(sigtab_zinbWald_SA_Fun, function(x) rownames(x))
+SA_Fun_ancomWZ_ASVs <- lapply(fdr_ancom_SA_Fun, function(x) as.vector(x[,'Species']))
+SA_Fun_ancomNoZ_ASVs <- lapply(fdr_ancomNoZ_SA_Fun, function(x) as.vector(x[,'Species']))
+
+#Within each plant concatenate the identified asvs
+#SA_Fun
+SA_Fun_conca <- mapply(function(t,w,x,y,z){
+  input<-c(t,w,x,y,z)
+  },
+  t = SA_Fun_DESeqWald_ASVs,
+  w = SA_Fun_zinbLRT_ASVs,
+  x = SA_Fun_zinbWald_ASVs,
+  y = SA_Fun_ancomWZ_ASVs,
+  z = SA_Fun_ancomNoZ_ASVs,
+  SIMPLIFY = FALSE)
+
+save(SA_Fun_conca, 
+     file = "./05_Differential_abundance/Objects/SA_Fun_conca.RData")
+
+#Remove duplicated asvs names from that list
+SA_Fun_conca_nodup <- lapply(SA_Fun_conca, function(x)
+  unique(x))
+
+save(SA_Fun_conca_nodup, 
+     file = "./05_Differential_abundance/Objects/SA_Fun_conca_nodup.RData")
+
+#Filter to ASVs detected by at least 2 tests
+SA_Fun_conca_two <- lapply(SA_Fun_conca, function(x) 
+  x[duplicated(x)])
+SA_Fun_conca_two_f <- lapply(SA_Fun_conca_two, function(x) 
+  x[!duplicated(x)])
+
+save(SA_Fun_conca_two_f, 
+     file = "./05_Differential_abundance/Objects/SA_Fun_conca_two_f.RData")
+
+```
+
+##5.3.2 UpsetR plots to summarize results for all species
+###5.3.2_1 For Upset plots per plant to work, identify which plants have 0 ASVs detected in 4 out of the 5 tests as this will not be plotted by upset causing the function to crash
+```{r}
+##Load outputs from each test
+load("./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/sigtab_stddds2_Wald_MeJA_Fun.RData")
+load("./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/sigtab_zinbLRT_MeJA_Fun.RData")
+load("./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/sigtab_zinbWald_MeJA_Fun.RData")
+load("./05_Differential_abundance/Objects/5.2ANCOM/fdr_ancomWZ_MeJA_Fun.RData")
+load("./05_Differential_abundance/Objects/5.2ANCOM/fdr_ancomNoZ_MeJA_Fun.RData")
+
+len_MeJA_Fun_DESeqWald_ASVs <- lapply(sigtab_stddds2_Wald_MeJA_Fun, function(x) length(rownames(x)))
+len_MeJA_Fun_zinbLRT_ASVs <- lapply(sigtab_zinbLRT_MeJA_Fun, function(x) length(rownames(x)))
+len_MeJA_Fun_zinbWald_ASVs <- lapply(sigtab_zinbWald_MeJA_Fun, function(x) length(rownames(x)))
+len_MeJA_Fun_ancomWZ_ASVs <- lapply(fdr_ancom_MeJA_Fun, function(x) length(as.vector(x[,'Species'])))
+len_MeJA_Fun_ancomNoZ_ASVs <- lapply(fdr_ancomNoZ_MeJA_Fun, function(x) length(as.vector(x[,'Species'])))
+
+len_MeJA_Fun_conca_noANCOMWZ <- list(deseq=len_MeJA_Fun_DESeqWald_ASVs, zinblrt=len_MeJA_Fun_zinbLRT_ASVs, zinbwald=len_MeJA_Fun_zinbWald_ASVs, ancomNoZ=len_MeJA_Fun_ancomNoZ_ASVs)
+
+lst <- lapply(len_MeJA_Fun_conca_noANCOMWZ, table)
+
+out <- do.call(rbind, lapply(seq_along(lst), function(x) 
+  cbind(id = x, data.frame(lst[[x]]))))
+
+#  id At Al Cas Tg Ec Mm Bv Lr Ds Bn Sar Sal Hi Br Bo_F Bo_M Bo_S BoK Dt Si It Co Lm Ia Bi Es Sl Nb Ps Mt Zm Bd Cus Freq
+#1  1  0  0   0  0  0  0  0  6  0  1   1   0  2  0    0    3    6   0  1  0  1  1  0  0 10  0  3  2  2  3 10  1   3    1
+#2  2  0  0   1  0  0  0  0  0  0  0   2   0  4  1    0    2    3   1  0  0  3  1  0  0  9  0  5  8  2  0  5  0  10    1
+#3  3  1  1  10  0  0  0  2  5  0  0   8  10  8  0    0    2    4   1  1  0  8  4  2  0  9  0  0 14  4  8  0  0  17    1
+#4  4  0  1   0  0  0  1  0  0  0  0   2   0  1  0    2    1    6   0  0  1  0  1  1  0  0  1  0  0  0  1  0  0   0    1
+
+#Would need to remove: Tg, Ec, Ds and Ia 
+
+##Load outputs from each test
+load("./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/sigtab_stddds2_Wald_SA_Fun.RData")
+load("./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/sigtab_zinbLRT_SA_Fun.RData")
+load("./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/sigtab_zinbWald_SA_Fun.RData")
+load("./05_Differential_abundance/Objects/5.2ANCOM/fdr_ancomWZ_SA_Fun.RData")
+load("./05_Differential_abundance/Objects/5.2ANCOM/fdr_ancomNoZ_SA_Fun.RData")
+
+len_SA_Fun_DESeqWald_ASVs <- lapply(sigtab_stddds2_Wald_SA_Fun, function(x) length(rownames(x)))
+len_SA_Fun_zinbLRT_ASVs <- lapply(sigtab_zinbLRT_SA_Fun, function(x) length(rownames(x)))
+len_SA_Fun_zinbWald_ASVs <- lapply(sigtab_zinbWald_SA_Fun, function(x) length(rownames(x)))
+len_SA_Fun_ancomWZ_ASVs <- lapply(fdr_ancom_SA_Fun, function(x) length(as.vector(x[,'Species'])))
+len_SA_Fun_ancomNoZ_ASVs <- lapply(fdr_ancomNoZ_SA_Fun, function(x) length(as.vector(x[,'Species'])))
+
+len_SA_Fun_conca_noANCOMWZ <- list(deseq=len_SA_Fun_DESeqWald_ASVs, zinblrt=len_SA_Fun_zinbLRT_ASVs, zinbwald=len_SA_Fun_zinbWald_ASVs, ancomNoZ=len_SA_Fun_ancomNoZ_ASVs)
+
+lst <- lapply(len_SA_Fun_conca_noANCOMWZ, table)
+
+out <- do.call(rbind, lapply(seq_along(lst), function(x) 
+  cbind(id = x, data.frame(lst[[x]]))))
+
+#> out
+#  id At Al Cas Tg Ec Mm Bv Lr Ds Bn Sar Sal Hi Br Bo_F Bo_M Bo_S BoK Dt Si It Co Lm Ia Bi Es Sl Nb Ps Mt Zm Bd Cus Freq
+#1  1  0  2   0  0  4  0  0  0  0  1   1   0  2  0    0    1   23   0  1  0  6  1  0  1  0  0  1  2  1  0  6  0   1    1
+#2  2  2  1   0  0  1  1  0  4  0  0   0   0  2  0    2    3    7   1  0  1  4  2  0  1  0  0  2  3  3  2  2  0   7    1
+#3  3  4  1   1  0  2  0  3 14  0  0   6   1 11  0   10    7    0   6  0  1  7 19  6  3  0  0  0  9  5  2  0  0   8    1
+#4  4  0  1   0  1  1  1  0  0  0  0   1   0  2  2    1    0    0   3  1  1  5  0  0  1  0  2  0  0  1  1  0  1   1    1
+
+#Would need to remove: Ds and Bi
+
+```
+
+
+###5.3.2_2 Upset ASVs detected by each test per species
+```{r}
+library(UpSetR)
+#Make sure the ASVs from each test are loaded (chunk 5.3.1)
+
+#MeJA_Bac
+##use upset function. make sure to have names of the objects inside the lists!
+MeJA_Bac_upset_5DAtests <- mapply(function(t,w,x,y,z){
+  input<-list(t,w,x,y,z)
+  names(input)<- c("Std_DESeq", # adds names to the list of tests
+                   "zinb_DESeq_LRT",
+                   "zinb_DESeq_Wald",
+                   "ancomWZ", 
+                   "ancomNoZ" )
+output<-upset(fromList(input), order.by = "freq", nsets = 12, nintersects=100)
+return(output)
+  },
+  t = MeJA_Bac_DESeqWald_ASVs,
+  w = MeJA_Bac_zinbLRT_ASVs,
+  x = MeJA_Bac_zinbWald_ASVs,
+  y = MeJA_Bac_ancomWZ_ASVs,
+  z = MeJA_Bac_ancomNoZ_ASVs, 
+  SIMPLIFY = FALSE)
+
+#Save files
+save(MeJA_Bac_upset_5DAtests, 
+     file = "./05_Differential_abundance/Results/UpSetRPlots/MeJA_Bac_upset_5DAtests.RData")
+
+ggexport(MeJA_Bac_upset_5DAtests, filename = "./05_Differential_abundance/Results/UpSetRPlots/MeJA_Bac_upset_5DAtests.pdf",
+ ncol = 1, nrow = 1, height=10, width = 10)
+
+load("./05_Differential_abundance/Results/UpSetRPlots/MeJA_Bac_upset_5DAtests.RData")
+
+#Adjusting the plot to fit bigger slides
+MeJA_Bac_upset_5DAtests_2 <- mapply(function(t,w,x,y,z){
+  input<-list(t,w,x,y,z)
+  names(input)<- c("Std_DESeq", # adds names to the list of tests
+                   "zinb_DESeq_LRT",
+                   "zinb_DESeq_Wald",
+                   "ancomWZ", 
+                   "ancomNoZ" )
+output<-upset(fromList(input), order.by = "freq", nsets = 12, nintersects=100, text.scale = 3, set_size.angles = 0,
+  set_size.show = FALSE, set_size.numbers_size = NULL)
+return(output)
+  },
+  t = MeJA_Bac_DESeqWald_ASVs,
+  w = MeJA_Bac_zinbLRT_ASVs,
+  x = MeJA_Bac_zinbWald_ASVs,
+  y = MeJA_Bac_ancomWZ_ASVs,
+  z = MeJA_Bac_ancomNoZ_ASVs, 
+  SIMPLIFY = FALSE)
+
+MeJA_Bac_upset_5DAtests_2$At
+MeJA_Bac_upset_5DAtests_2$Bo_M
+
+ggexport(MeJA_Bac_upset_5DAtests_2, filename = "./05_Differential_abundance/Results/UpSetRPlots/MeJA_Bac_upset_5DAtests_2.pdf",
+ ncol = 1, nrow = 1, height=10, width = 10)
+
+#SA_Bac
+##use upset function. make sure to have names of the objects inside the lists!
+SA_Bac_upset_5DAtests <- mapply(function(t,w,x,y,z){
+  input<-list(t,w,x,y,z)
+  names(input)<- c("Std_DESeq", # adds names to the list of tests
+                   "zinb_DESeq_LRT",
+                   "zinb_DESeq_Wald",
+                   "ancomWZ", 
+                   "ancomNoZ" )
+output<-upset(fromList(input), order.by = "freq", nsets = 12, nintersects=100)
+return(output)
+  },
+  t = SA_Bac_DESeqWald_ASVs,
+  w = SA_Bac_zinbLRT_ASVs,
+  x = SA_Bac_zinbWald_ASVs,
+  y = SA_Bac_ancomWZ_ASVs,
+  z = SA_Bac_ancomNoZ_ASVs, 
+  SIMPLIFY = FALSE)
+
+#Save files
+save(SA_Bac_upset_5DAtests, 
+     file = "./05_Differential_abundance/Results/UpSetRPlots/SA_Bac_upset_5DAtests.RData")
+
+ggexport(SA_Bac_upset_5DAtests, filename = "./05_Differential_abundance/Results/UpSetRPlots/SA_Bac_upset_5DAtests.pdf",
+ ncol = 1, nrow = 1, height=10, width = 10)
+
+#MeJA_Fun
+#Remove plants with 0 detected ASVs in 4 out of 5 tests (identified in chunk 5.3.2_1)
+plants29_MeJA_Fun_DESeqWald_ASVs = within(MeJA_Fun_DESeqWald_ASVs, rm("Ia", "Ec", "Tg", "Ds"))
+plants29_MeJA_Fun_zinbLRT_ASVs = within(MeJA_Fun_zinbLRT_ASVs, rm("Ia", "Ec", "Tg", "Ds"))
+plants29_MeJA_Fun_zinbWald_ASVs = within(MeJA_Fun_zinbWald_ASVs, rm("Ia", "Ec", "Tg", "Ds"))
+plants29_MeJA_Fun_ancomWZ_ASVs = within(MeJA_Fun_ancomWZ_ASVs, rm("Ia", "Ec", "Tg", "Ds"))
+plants29_MeJA_Fun_ancomNoZ_ASVs = within(MeJA_Fun_ancomNoZ_ASVs, rm("Ia", "Ec", "Tg", "Ds"))
+  
+##use upset function. make sure to have names of the objects inside the lists!  
+MeJA_Fun_upset_5DAtests <- mapply(function(t,w,x,y,z){
+  input<-list(t,w,x,y,z)
+  names(input)<- c("Std_DESeq", # adds names to the list of tests
+                   "zinb_DESeq_LRT",
+                   "zinb_DESeq_Wald",
+                   "ancomWZ", 
+                   "ancomNoZ" )
+output<-upset(fromList(input), order.by = "freq", nsets = 12, nintersects=100)
+return(output)
+  },
+  t = plants29_MeJA_Fun_DESeqWald_ASVs,
+  w = plants29_MeJA_Fun_zinbLRT_ASVs,
+  x = plants29_MeJA_Fun_zinbWald_ASVs,
+  y = plants29_MeJA_Fun_ancomWZ_ASVs,
+  z = plants29_MeJA_Fun_ancomNoZ_ASVs, 
+  SIMPLIFY = FALSE)
+
+#Save files
+save(MeJA_Fun_upset_5DAtests, 
+     file = "./05_Differential_abundance/Results/UpSetRPlots/MeJA_Fun_upset_5DAtests.RData")
+
+ggexport(MeJA_Fun_upset_5DAtests, filename = "./05_Differential_abundance/Results/UpSetRPlots/MeJA_Fun_upset_5DAtests.pdf",
+ ncol = 1, nrow = 1, height=10, width = 10)
+
+
+
+#SA_Fun
+
+#Remove plants with 0 detected ASVs in 4 out of 5 tests (identified in chunk 5.3.2_1)
+plants31_SA_Fun_DESeqWald_ASVs = within(SA_Fun_DESeqWald_ASVs, rm("Bi", "Ds"))
+plants31_SA_Fun_zinbLRT_ASVs = within(SA_Fun_zinbLRT_ASVs, rm("Bi", "Ds"))
+plants31_SA_Fun_zinbWald_ASVs = within(SA_Fun_zinbWald_ASVs, rm("Bi", "Ds"))
+plants31_SA_Fun_ancomWZ_ASVs = within(SA_Fun_ancomWZ_ASVs, rm("Bi", "Ds"))
+plants31_SA_Fun_ancomNoZ_ASVs = within(SA_Fun_ancomNoZ_ASVs, rm("Bi", "Ds"))
+
+##use upset function. make sure to have names of the objects inside the lists!
+SA_Fun_upset_5DAtests <- mapply(function(t,w,x,y,z){
+  input<-list(t,w,x,y,z)
+  names(input)<- c("Std_DESeq", # adds names to the list of tests
+                   "zinb_DESeq_LRT",
+                   "zinb_DESeq_Wald",
+                   "ancomWZ", 
+                   "ancomNoZ" )
+output<-upset(fromList(input), order.by = "freq", nsets = 12, nintersects=100)
+return(output)
+  },
+  t = plants31_SA_Fun_DESeqWald_ASVs,
+  w = plants31_SA_Fun_zinbLRT_ASVs,
+  x = plants31_SA_Fun_zinbWald_ASVs,
+  y = plants31_SA_Fun_ancomWZ_ASVs,
+  z = plants31_SA_Fun_ancomNoZ_ASVs, 
+  SIMPLIFY = FALSE)
+
+#Save files
+save(SA_Fun_upset_5DAtests, 
+     file = "./05_Differential_abundance/Results/UpSetRPlots/SA_Fun_upset_5DAtests.RData")
+
+ggexport(SA_Fun_upset_5DAtests, filename = "./05_Differential_abundance/Results/UpSetRPlots/SA_Fun_upset_5DAtests.pdf",
+ ncol = 1, nrow = 1, height=10, width = 10)
+
+
+```
+
+#5.3.3 Dfs comparing ASVs detected by x amount of tests
+```{r}
+library("tuple")
+
+#df with the amount of ASVs detected by at least one test and those detected by 2, 3 or more tests
+
+#MeJA_Bac
+#First amount of ASVs detected by at least one test
+load("./05_Differential_abundance/Objects/MeJA_Bac_conca_nodup.RData")
+MeJA_Bac_conca_nodup_num <- lapply(MeJA_Bac_conca_nodup, function(x) length(x))
+MeJA_Bac_conca_nodup_df <- as.data.frame(MeJA_Bac_conca_nodup_num)
+
+#Detected by at least two tests
+load("./05_Differential_abundance/Objects/MeJA_Bac_conca.RData")
+MeJA_Bac_conca_two <- lapply(MeJA_Bac_conca, function(x) 
+  x[duplicated(x)])
+MeJA_Bac_conca_two_f <- lapply(MeJA_Bac_conca_two, function(x) 
+  x[!duplicated(x)])
+MeJA_Bac_conca_two_f_num <- lapply(MeJA_Bac_conca_two_f, function(x) length(x))
+MeJA_Bac_conca_two_df <- as.data.frame(MeJA_Bac_conca_two_f_num)
+
+#Three tests
+#Keep only asvs that are at least three times 
+MeJA_Bac_conca_three <- lapply(MeJA_Bac_conca, function(x)
+  x[triplicated(x)])
+#vectors that appear more than 3 times may be duplicated inthe new object, so make sure all vectors are unique
+MeJA_Bac_conca_three_f <- lapply(MeJA_Bac_conca_three, function(x)
+  x[!duplicated(x)])
+MeJA_Bac_conca_three_f_num <- lapply(MeJA_Bac_conca_three_f, function(x) length(x))
+MeJA_Bac_conca_three_df <- as.data.frame(MeJA_Bac_conca_three_f_num)
+
+MeJA_Bac_detected_listed <- list(all = MeJA_Bac_conca_nodup_df, two_at_least = MeJA_Bac_conca_two_df, three_at_least = MeJA_Bac_conca_three_df)
+MeJA_Bac_DA_detected <- merge((t(MeJA_Bac_conca_nodup_df)), (t(MeJA_Bac_conca_two_df)), by = 0, all = T)
+rownames(MeJA_Bac_DA_detected) <- MeJA_Bac_DA_detected$Row.names; MeJA_Bac_DA_detected$Row.names <- NULL
+MeJA_Bac_DA_detected_final <- merge(MeJA_Bac_DA_detected, (t(MeJA_Bac_conca_three_df)), by = "row.names", all = T)
+rownames(MeJA_Bac_DA_detected_final) <- MeJA_Bac_DA_detected_final$Row.names; MeJA_Bac_DA_detected_final$Row.names <- NULL
+colnames(MeJA_Bac_DA_detected_final) <- c("All_detected_MeJA_Bac", "two_tests_or_more", "three_tests_or_more")
+
+#Save table
+write.table(MeJA_Bac_DA_detected_final, file="./05_Differential_abundance/Results/MeJA_Bac_DA_detected_final.txt",
+sep = "\t", quote = F, row.names = T)
+
+
+
+#SA_Bac
+#First amount of ASVs detected by at least one test
+load("./05_Differential_abundance/Objects/SA_Bac_conca_nodup.RData")
+SA_Bac_conca_nodup_num <- lapply(SA_Bac_conca_nodup, function(x) length(x))
+SA_Bac_conca_nodup_df <- as.data.frame(SA_Bac_conca_nodup_num)
+
+#Detected by at least two tests
+load("./05_Differential_abundance/Objects/SA_Bac_conca.RData")
+SA_Bac_conca_two <- lapply(SA_Bac_conca, function(x) 
+  x[duplicated(x)])
+SA_Bac_conca_two_f <- lapply(SA_Bac_conca_two, function(x) 
+  x[!duplicated(x)])
+SA_Bac_conca_two_f_num <- lapply(SA_Bac_conca_two_f, function(x) length(x))
+SA_Bac_conca_two_df <- as.data.frame(SA_Bac_conca_two_f_num)
+
+#Three tests
+#Keep only asvs that are at least three times 
+SA_Bac_conca_three <- lapply(SA_Bac_conca, function(x)
+  x[triplicated(x)])
+#vectors that appear more than 3 times may be duplicated inthe new object, so make sure all vectors are unique
+SA_Bac_conca_three_f <- lapply(SA_Bac_conca_three, function(x)
+  x[!duplicated(x)])
+SA_Bac_conca_three_f_num <- lapply(SA_Bac_conca_three_f, function(x) length(x))
+SA_Bac_conca_three_df <- as.data.frame(SA_Bac_conca_three_f_num)
+
+SA_Bac_detected_listed <- list(all = SA_Bac_conca_nodup_df, two_at_least = SA_Bac_conca_two_df, three_at_least = SA_Bac_conca_three_df)
+SA_Bac_DA_detected <- merge((t(SA_Bac_conca_nodup_df)), (t(SA_Bac_conca_two_df)), by = 0, all = T)
+rownames(SA_Bac_DA_detected) <- SA_Bac_DA_detected$Row.names; SA_Bac_DA_detected$Row.names <- NULL
+SA_Bac_DA_detected_final <- merge(SA_Bac_DA_detected, (t(SA_Bac_conca_three_df)), by = "row.names", all = T)
+rownames(SA_Bac_DA_detected_final) <- SA_Bac_DA_detected_final$Row.names; SA_Bac_DA_detected_final$Row.names <- NULL
+colnames(SA_Bac_DA_detected_final) <- c("All_detected_SA_Bac", "two_tests_or_more", "three_tests_or_more")
+
+#Save table
+write.table(SA_Bac_DA_detected_final, file="./05_Differential_abundance/Results/SA_Bac_DA_detected_final.txt",
+sep = "\t", quote = F, row.names = T)
+
+
+#MeJA_Fun
+#First amount of ASVs detected by at least one test
+load("./05_Differential_abundance/Objects/MeJA_Fun_conca_nodup.RData")
+MeJA_Fun_conca_nodup_num <- lapply(MeJA_Fun_conca_nodup, function(x) length(x))
+MeJA_Fun_conca_nodup_df <- as.data.frame(MeJA_Fun_conca_nodup_num)
+
+#Detected by at least two tests
+load("./05_Differential_abundance/Objects/MeJA_Fun_conca.RData")
+MeJA_Fun_conca_two <- lapply(MeJA_Fun_conca, function(x) 
+  x[duplicated(x)])
+MeJA_Fun_conca_two_f <- lapply(MeJA_Fun_conca_two, function(x) 
+  x[!duplicated(x)])
+MeJA_Fun_conca_two_f_num <- lapply(MeJA_Fun_conca_two_f, function(x) length(x))
+MeJA_Fun_conca_two_df <- as.data.frame(MeJA_Fun_conca_two_f_num)
+
+#Three tests
+#Keep only asvs that are at least three times 
+MeJA_Fun_conca_three <- lapply(MeJA_Fun_conca, function(x)
+  x[triplicated(x)])
+#vectors that appear more than 3 times may be duplicated inthe new object, so make sure all vectors are unique
+MeJA_Fun_conca_three_f <- lapply(MeJA_Fun_conca_three, function(x)
+  x[!duplicated(x)])
+MeJA_Fun_conca_three_f_num <- lapply(MeJA_Fun_conca_three_f, function(x) length(x))
+MeJA_Fun_conca_three_df <- as.data.frame(MeJA_Fun_conca_three_f_num)
+
+MeJA_Fun_detected_listed <- list(all = MeJA_Fun_conca_nodup_df, two_at_least = MeJA_Fun_conca_two_df, three_at_least = MeJA_Fun_conca_three_df)
+MeJA_Fun_DA_detected <- merge((t(MeJA_Fun_conca_nodup_df)), (t(MeJA_Fun_conca_two_df)), by = 0, all = T)
+rownames(MeJA_Fun_DA_detected) <- MeJA_Fun_DA_detected$Row.names; MeJA_Fun_DA_detected$Row.names <- NULL
+MeJA_Fun_DA_detected_final <- merge(MeJA_Fun_DA_detected, (t(MeJA_Fun_conca_three_df)), by = "row.names", all = T)
+rownames(MeJA_Fun_DA_detected_final) <- MeJA_Fun_DA_detected_final$Row.names; MeJA_Fun_DA_detected_final$Row.names <- NULL
+colnames(MeJA_Fun_DA_detected_final) <- c("All_detected_MeJA_Fun", "two_tests_or_more", "three_tests_or_more")
+
+#Save table
+write.table(MeJA_Fun_DA_detected_final, file="./05_Differential_abundance/Results/MeJA_Fun_DA_detected_final.txt",
+sep = "\t", quote = F, row.names = T)
+
+
+
+
+#SA_Fun
+#First amount of ASVs detected by at least one test
+load("./05_Differential_abundance/Objects/SA_Fun_conca_nodup.RData")
+SA_Fun_conca_nodup_num <- lapply(SA_Fun_conca_nodup, function(x) length(x))
+SA_Fun_conca_nodup_df <- as.data.frame(SA_Fun_conca_nodup_num)
+
+#Detected by at least two tests
+load("./05_Differential_abundance/Objects/SA_Fun_conca.RData")
+SA_Fun_conca_two <- lapply(SA_Fun_conca, function(x) 
+  x[duplicated(x)])
+SA_Fun_conca_two_f <- lapply(SA_Fun_conca_two, function(x) 
+  x[!duplicated(x)])
+SA_Fun_conca_two_f_num <- lapply(SA_Fun_conca_two_f, function(x) length(x))
+SA_Fun_conca_two_df <- as.data.frame(SA_Fun_conca_two_f_num)
+
+#Three tests
+#Keep only asvs that are at least three times 
+SA_Fun_conca_three <- lapply(SA_Fun_conca, function(x)
+  x[triplicated(x)])
+#vectors that appear more than 3 times may be duplicated inthe new object, so make sure all vectors are unique
+SA_Fun_conca_three_f <- lapply(SA_Fun_conca_three, function(x)
+  x[!duplicated(x)])
+SA_Fun_conca_three_f_num <- lapply(SA_Fun_conca_three_f, function(x) length(x))
+SA_Fun_conca_three_df <- as.data.frame(SA_Fun_conca_three_f_num)
+
+SA_Fun_detected_listed <- list(all = SA_Fun_conca_nodup_df, two_at_least = SA_Fun_conca_two_df, three_at_least = SA_Fun_conca_three_df)
+SA_Fun_DA_detected <- merge((t(SA_Fun_conca_nodup_df)), (t(SA_Fun_conca_two_df)), by = 0, all = T)
+rownames(SA_Fun_DA_detected) <- SA_Fun_DA_detected$Row.names; SA_Fun_DA_detected$Row.names <- NULL
+SA_Fun_DA_detected_final <- merge(SA_Fun_DA_detected, (t(SA_Fun_conca_three_df)), by = "row.names", all = T)
+rownames(SA_Fun_DA_detected_final) <- SA_Fun_DA_detected_final$Row.names; SA_Fun_DA_detected_final$Row.names <- NULL
+colnames(SA_Fun_DA_detected_final) <- c("All_detected_SA_Fun", "two_tests_or_more", "three_tests_or_more")
+
+#Save table
+write.table(SA_Fun_DA_detected_final, file="./05_Differential_abundance/Results/SA_Fun_DA_detected_final.txt",
+sep = "\t", quote = F, row.names = T)
+
+
+```
+
+
+
+#Comparing accross plants
+
+###Upset comparing ASVs across BRASSICACEAE
+```{r}
+library(UpSetR)
+#MeJA_Bac
+#upset plot
+load("./05_Differential_abundance/Objects/MeJA_Bac_conca_two_f.RData")
+
+#Detected by two tests UpSet plot
+MeJA_Bac_allsp_twotest_all <- upset(fromList(MeJA_Bac_conca_two_f), nsets = 50, nintersects = NA, order.by = "freq")
+save(MeJA_Bac_allsp_twotest_all, 
+     file = "./05_Differential_abundance/Results/UpSetRPlots/MeJA_Bac_allsp_twotest_all.RData")
+
+```
+
+#Add taxonomy to the list of detected ASVs so you can make tests at different taxonomic levels
+```{r}
+#MeJA_Bac
+#Filter phyloseq objects to contain only ASVs detected by at least one DA test
+#load the list with these ASVs per plant species and the phyloseq object (already subsetted to MeJA_Bac and listed per plant species)
+load("./05_Differential_abundance/Objects/MeJA_Bac_conca_two_f.RData")
+load("./05_Differential_abundance/Objects/MeJA_unnorm_Bac_ps_l.RData")
+
+#Check MeJA_Bac_conca_two_f and identify plants that have 0 ASVs detected, these need to be removed from both objects for the functions to run
+
+#In this case these are: Al and Sar
+
+#Make copies of the objects to then remove plants with 0 or 1 asvs detected by 2 tests
+MeJA_Bac_conca_two_f_31plants <- MeJA_Bac_conca_two_f
+MeJA_unnorm_Bac_ps_l_31plants <- MeJA_unnorm_Bac_ps_l
+
+#Remove plants with 0 ASVs detected by two tests
+#Remove Lm, Al and Sar because they have 0 or 1 ASVs detected 
+MeJA_Bac_conca_two_f_31plants$Al <- NULL
+MeJA_Bac_conca_two_f_31plants$Sar <- NULL
+#Also from the phyloseq object
+MeJA_unnorm_Bac_ps_l_31plants$Al <- NULL
+MeJA_unnorm_Bac_ps_l_31plants$Sar <- NULL
+
+#Subset to those lists
+twotests_MeJA_Bac_ps_unnorm_31plants <-mapply (function (list_1,list_2) 
+            prune_taxa(taxa = list_1, x = list_2), #here, x as the name of an argument of prune_taxa, and refers to a phyloseq object
+          list_1 = MeJA_Bac_conca_two_f_31plants, # List of ASVs to keep on the phyloseq object
+          list_2 = MeJA_unnorm_Bac_ps_l_31plants, #phyloseq object
+          SIMPLIFY = FALSE)
+
+save(twotests_MeJA_Bac_ps_unnorm_31plants, 
+     file = "./05_Differential_abundance/Objects/twotests_MeJA_Bac_ps_unnorm_31plants.RData")
+save(MeJA_unnorm_Bac_ps_l_31plants, 
+     file = "./05_Differential_abundance/Objects/MeJA_unnorm_Bac_ps_l_31plants.RData")
+
+
+
+#SA_Bac
+#Filter phyloseq objects to contain only ASVs detected by at least one DA test
+#load the list with these ASVs per plant species and the phyloseq object (already subsetted to SA_Bac and listed per plant species)
+load("./05_Differential_abundance/Objects/SA_Bac_conca_two_f.RData")
+load("./05_Differential_abundance/Objects/SA_unnorm_Bac_ps_l.RData")
+
+
+#Check SA_Bac_conca_two_f and identify plants that have 0 ASVs detected, these need to be removed from both objects for the functions to run
+
+#In this case this is only Al
+
+#Make copies of the objects to then remove plants with 0 or 1 asvs detected by 2 tests
+SA_Bac_conca_two_f_32plants <- SA_Bac_conca_two_f
+SA_unnorm_Bac_ps_l_32plants <- SA_unnorm_Bac_ps_l
+
+#Remove plants with 0 ASVs detected by two tests
+SA_Bac_conca_two_f_32plants$Al <- NULL
+#Also from the phyloseq object
+SA_unnorm_Bac_ps_l_32plants$Al <- NULL
+
+#Subset to those lists
+twotests_SA_Bac_ps_unnorm_32plants <-mapply (function (list_1,list_2) 
+            prune_taxa(taxa = list_1, x = list_2), #here, x as the name of an argument of prune_taxa, and refers to a phyloseq object
+          list_1 = SA_Bac_conca_two_f_32plants, # List of ASVs to keep on the phyloseq object
+          list_2 = SA_unnorm_Bac_ps_l_32plants, #phyloseq object
+          SIMPLIFY = FALSE)
+
+save(twotests_SA_Bac_ps_unnorm_32plants, 
+     file = "./05_Differential_abundance/Objects/twotests_SA_Bac_ps_unnorm_32plants.RData")
+save(SA_unnorm_Bac_ps_l_32plants, 
+     file = "./05_Differential_abundance/Objects/SA_unnorm_Bac_ps_l_32plants.RData")
+
+#MeJA_Fun
+#Filter phyloseq objects to contain only ASVs detected by at least one DA test
+#load the list with these ASVs per plant species and the phyloseq object (already subsetted to MeJA_Fun and listed per plant species)
+load("./05_Differential_abundance/Objects/MeJA_Fun_conca_two_f.RData")
+load("./05_Differential_abundance/Objects/MeJA_unnorm_Fun_ps_l.RData")
+
+#Check MeJA_Fun_conca_two_f and identify plants that have 0 ASVs detected, these need to be removed from both objects for the functions to run
+
+#In this case these are: Tg, Ec, Ds, Bn, Ia
+
+#Make copies of the objects to then remove plants with 0 or 1 asvs detected by 2 tests
+MeJA_Fun_conca_two_f_28plants <- MeJA_Fun_conca_two_f
+MeJA_unnorm_Fun_ps_l_28plants <- MeJA_unnorm_Fun_ps_l
+
+#Remove plants with 0 ASVs detected by two tests
+MeJA_Fun_conca_two_f_28plants$Tg <- NULL
+MeJA_Fun_conca_two_f_28plants$Ec <- NULL
+MeJA_Fun_conca_two_f_28plants$Ds <- NULL
+MeJA_Fun_conca_two_f_28plants$Bn <- NULL
+MeJA_Fun_conca_two_f_28plants$Ia <- NULL
+#Also from the phyloseq object
+MeJA_unnorm_Fun_ps_l_28plants$Tg <- NULL
+MeJA_unnorm_Fun_ps_l_28plants$Ec <- NULL
+MeJA_unnorm_Fun_ps_l_28plants$Ds <- NULL
+MeJA_unnorm_Fun_ps_l_28plants$Bn <- NULL
+MeJA_unnorm_Fun_ps_l_28plants$Ia <- NULL
+
+#Subset to those lists
+twotests_MeJA_Fun_ps_unnorm_28plants <-mapply (function (list_1,list_2) 
+            prune_taxa(taxa = list_1, x = list_2), #here, x as the name of an argument of prune_taxa, and refers to a phyloseq object
+          list_1 = MeJA_Fun_conca_two_f_28plants, # List of ASVs to keep on the phyloseq object
+          list_2 = MeJA_unnorm_Fun_ps_l_28plants, #phyloseq object
+          SIMPLIFY = FALSE)
+
+save(twotests_MeJA_Fun_ps_unnorm_28plants, 
+     file = "./05_Differential_abundance/Objects/twotests_MeJA_Fun_ps_unnorm_28plants.RData")
+save(MeJA_unnorm_Fun_ps_l_28plants, 
+     file = "./05_Differential_abundance/Objects/MeJA_unnorm_Fun_ps_l_28plants.RData")
+
+
+
+#SA_Fun
+#Filter phyloseq objects to contain only ASVs detected by at least one DA test
+#load the list with these ASVs per plant species and the phyloseq object (already subsetted to SA_Fun and listed per plant species)
+load("./05_Differential_abundance/Objects/SA_Fun_conca_two_f.RData")
+load("./05_Differential_abundance/Objects/SA_unnorm_Fun_ps_l.RData")
+
+
+#Check SA_Fun_conca_two_f and identify plants that have 0 ASVs detected, these need to be removed from both objects for the functions to run
+
+#In this case these are: Ds, Bn, Sal and Bi
+
+#Make copies of the objects to then remove plants with 0 or 1 asvs detected by 2 tests
+SA_Fun_conca_two_f_29plants <- SA_Fun_conca_two_f
+SA_unnorm_Fun_ps_l_29plants <- SA_unnorm_Fun_ps_l
+
+#Remove plants with 0 ASVs detected by two tests
+SA_Fun_conca_two_f_29plants$Sal <- NULL
+SA_Fun_conca_two_f_29plants$Bi <- NULL
+SA_Fun_conca_two_f_29plants$Ds <- NULL
+SA_Fun_conca_two_f_29plants$Bn <- NULL
+#Also from the phyloseq object
+SA_unnorm_Fun_ps_l_29plants$Sal <- NULL
+SA_unnorm_Fun_ps_l_29plants$Bi <- NULL
+SA_unnorm_Fun_ps_l_29plants$Ds <- NULL
+SA_unnorm_Fun_ps_l_29plants$Bn <- NULL
+
+
+#Subset to those lists
+twotests_SA_Fun_ps_unnorm_29plants <-mapply (function (list_1,list_2) 
+            prune_taxa(taxa = list_1, x = list_2), #here, x as the name of an argument of prune_taxa, and refers to a phyloseq object
+          list_1 = SA_Fun_conca_two_f_29plants, # List of ASVs to keep on the phyloseq object
+          list_2 = SA_unnorm_Fun_ps_l_29plants, #phyloseq object
+          SIMPLIFY = FALSE)
+
+save(twotests_SA_Fun_ps_unnorm_29plants, 
+     file = "./05_Differential_abundance/Objects/twotests_SA_Fun_ps_unnorm_29plants.RData")
+save(SA_unnorm_Fun_ps_l_29plants, 
+     file = "./05_Differential_abundance/Objects/SA_unnorm_Fun_ps_l_29plants.RData")
+
+```
+
+
+###UpSet comparing shared accross plant species at family level
+```{r}
+#Agglomerate to Family level
+twotests_MeJA_Bac_ps_unnorm_Family <- lapply(twotests_MeJA_Bac_ps_unnorm, function(x)
+  tax_glom(x, taxrank = "Family"))
+
+save(twotests_MeJA_Bac_ps_unnorm_Family, 
+     file = "./05_Differential_abundance/Objects/twotests_MeJA_Bac_ps_unnorm_Family.RData")
+
+#Turn families into vectors
+##Make tax_table a df
+twotests_MeJA_Bac_ps_unnorm_Family_df <- lapply(twotests_MeJA_Bac_ps_unnorm_Family, function(x) as.data.frame(tax_table(x)))
+##Subset that df to only keep column family
+twotests_MeJA_Bac_ps_unnorm_Family_vector <- lapply(twotests_MeJA_Bac_ps_unnorm_Family_df, function(x) as.vector(x$Family))
+#Remove duplicated families inside each plant list
+twotests_MeJA_Bac_ps_unnorm_Family_vector_nodup <- lapply(twotests_MeJA_Bac_ps_unnorm_Family_vector, function(x) 
+  x[!duplicated(x)])
+
+#Upset plot
+upset_Family_twotests_MeJA_Bac_allsp <- upset(fromList(twotests_MeJA_Bac_ps_unnorm_Family_vector_nodup), nsets = 50, nintersects = NA, order.by = "freq")
+
+pdf(file = "./05_Differential_abundance/Results/UpSetRPlots/upset_Family_twotests_MeJA_Bac_allsp.pdf",   # The directory you want to save the file in
+    width = 17, # The width of the plot in inches
+    height = 10)
+upset_Family_twotests_MeJA_Bac_allsp
+dev.off()
+
+#Quantify Shared and unique
+twotests_MeJA_Bac_ps_unnorm_Family_vector2_nodup <- stack(twotests_MeJA_Bac_ps_unnorm_Family_vector_nodup)$values 
+Family_twotests_MeJA_Bac_shared2plants <- 
+  twotests_MeJA_Bac_ps_unnorm_Family_vector2_nodup[duplicated(twotests_MeJA_Bac_ps_unnorm_Family_vector2_nodup)]
+Family_twotests_MeJA_Bac_shared2plants_f <-
+  Family_twotests_MeJA_Bac_shared2plants[!duplicated(Family_twotests_MeJA_Bac_shared2plants)]
+#number of shared families accross plant species
+numbershared <- length(Family_twotests_MeJA_Bac_shared2plants_f) #55
+
+#Unique
+Family_twotests_MeJA_Bac_unique <- unique(twotests_MeJA_Bac_ps_unnorm_Family_vector2_nodup) #99
+#Remove the shared bacterial families by getting the intersection
+Family_twotests_MeJA_Bac_unique_rmshared <- setdiff(Family_twotests_MeJA_Bac_unique, Family_twotests_MeJA_Bac_shared2plants_f) #number of unique families accross plant species
+numberunique <- length(Family_twotests_MeJA_Bac_unique_rmshared) #44
+
+```
+
+
+#Example of how it works to Keep ASVs detected by two or three tests using the ASV names as vectors and the functions duplicated and triplicated
+```{r}
+library("tuple")
+
+#2023-03-17
+fake_asvs <- c("bASVlala", "bASV_14")
+fake_asvs2 <- c("bASV_14", "bASVlala")
+fake_asvs3 <- c("bASVlala")
+fake_asvs4 <- c("bASVlala")
+fake_asvs5 <- c("bASVnini", "bASVtete", "bASVlili")
+fake_asvs6 <- c("bASVnini")
+
+fake_conca <- c(fake_asvs, fake_asvs2, fake_asvs3, fake_asvs4, fake_asvs5, fake_asvs6)
+dupli_keep <- fake_conca[duplicated(fake_conca)]
+#[1] "bASV_14"  "bASVlala" "bASVlala" "bASVlala" "bASVnini"
+dupli_keep_unique <- dupli_keep[!duplicated(dupli_keep)]
+#[1] "bASV_14"  "bASVlala" "bASVnini"
+
+#for 3 or more use https://rdrr.io/cran/tuple/man/triplicate.html
+tripli_keep <- fake_conca[triplicated(fake_conca)]
+#[1] "bASVlala" "bASVlala"
+tripli_keep_unique <- tripli_keep[!duplicated(tripli_keep)]
+#[1] "bASVlala"
+```
+
+
+#Metacoder with Pedro
+```{r}
+#Following Pedro's workshop https://github.com/PedroBeschoren/metacoder_workshop/blob/master/code/metacoder_workshop.Rmd
+
+#MeJA_Bac
+#Filter phyloseq objects to contain only ASVs detected by at least one DA test
+#load the list with these ASVs per plant species and the phyloseq object (already subsetted to MeJA_Bac and listed per plant species)
+load("./05_Differential_abundance/Objects/MeJA_Bac_conca_two_f.RData")
+load("./05_Differential_abundance/Objects/MeJA_unnorm_Bac_ps_l_unfilt.RData")
+
+# filter your list of phyloliseq objects to only contain the ASVs defined as "importat"
+MeJA_Bac_conca_twotests_ps<-mapply (function (list_1,list_2) #mapply will let you manipulate 2 or more lists at once
+            prune_taxa(taxa = list_1, x = list_2), #here, x as the name of an argument of prune_taxa, and refers to a phyloseq object
+          list_1 = MeJA_Bac_conca_two_f, # here you define what R object is list_1
+          list_2 = MeJA_unnorm_Bac_ps_l_unfilt, # here you define what R object is list_2
+          SIMPLIFY = FALSE)
+
+MeJA_Bac_conca_ps$At@tax_table
+
+
+#Subset taxonomy to Family level
+MeJA_Bac_conca_Family <- lapply(MeJA_Bac_conca_ps, function(x) {
+  tax_table(x)<-tax_table(x)[,2:6]
+  return(x)
+  })
+
+#Genus
+MeJA_Bac_conca_genus <- lapply(MeJA_Bac_conca_ps, function(x) {
+  tax_table(x)<-tax_table(x)[,2:7]
+  return(x)
+  })
+
+# transform from phyloseq to taxmap object
+#taxmap_MeJA_Bac_conca_Family <-lapply(MeJA_Bac_conca_Family[1:3], function(x)
+#                                      parse_phyloseq(x))
+
+
+
+
+
+
+```
+
+
+###Metacoder with Pedro: define custom function to create heat trees from ps objects, cpopied from chunk 3.8.1 - Define a custom function of the metacoder workshop from pedro]
+```{r}
+# define funciton to quickly plot a heat tree from a phtloseq object
+phyloseq_to_heat_tree_matrix<-function(ps_object, sample_group){
+  
+  # this function output is a heat trees comparing metadata. the input is based on a phyloseq object
+  
+  # ps object =  a phyloseq object, containing sample metadata, otu table, and taxonomy table
+  # sample_group = the name of a column in your emtadata that you want to compare in the heat tree. it has to be quoted.
+  
+  # this function will create a matrix of heat trees if your metadata has more than 2 groups. it should fail if it has only 1 group
+  
+
+#remove unecessary taxonomic info (dada2id, "s__" and "ASV_id) by updating the tax table with a subset of the tax table
+#tax_table(ps_object)<-tax_table(ps_object)[,1:6]
+
+
+# let's remove the "r__"ranks from the taxonomy, they can be useful but will pollute our plot
+tax_table(ps_object)[, colnames(tax_table(ps_object))] <- gsub(pattern = "[a-z]__", # regular expression pattern to search for
+                                                                   x = tax_table(ps_object)[, colnames(tax_table(ps_object))], # "df"
+                                                                   replacement = "") # replacement for pattern
+# transform from phyloseq to taxmap object
+taxmap_obj<-parse_phyloseq(ps_object)
+
+#get abundance per taxon
+taxmap_obj$data$tax_abund<-calc_taxon_abund(obj = taxmap_obj, 
+                                      data = "otu_table",
+                                      cols = taxmap_obj$data$sample_data$sample_id) 
+
+#get occurrence of ASVs per treatment
+# the sample groups needs some wrangling to fit within the soft code of the function
+taxmap_obj$data$tax_occ<- calc_n_samples(obj = taxmap_obj, 
+                                                      data = "tax_abund", 
+                                                      cols = taxmap_obj$data$sample_data$sample_id,
+                                                      groups = taxmap_obj$data$sample_data[colnames(taxmap_obj$data$sample_data)==sample_group][[1]]) 
+
+# calculate log2 median ratios and p values for a wilcoxcon test within taxas in this stress treatment groups
+# the sample groups needs some wrangling to fit within the soft code of the function
+taxmap_obj$data$diff_table <- compare_groups(obj = taxmap_obj,
+                                                        data = "tax_abund",
+                                                        cols = taxmap_obj$data$sample_data$sample_id, 
+                                                        groups = taxmap_obj$data$sample_data[colnames(taxmap_obj$data$sample_data)==sample_group][[1]]) 
+
+# set differential log ratio to 0 based on adjusted p values
+taxmap_obj$data$diff_table$log2_median_ratio[taxmap_obj$data$diff_table$wilcox_p_value > 0.05] <- 0
+
+# define number of compared factors
+factors_compared<-taxmap_obj$data$sample_data[colnames(taxmap_obj$data$sample_data)==sample_group][[1]] 
+
+# draw the plot based on an if else statement: if there are 2 groups, plot a a heat tree comparing abundances between both groups, else plot a matrix of ehat trees. this function will fail if you only have 1 sample group! 
+
+if (length(unique(factors_compared)) == 2) {
+
+set.seed(1)
+ output<- taxmap_obj %>%
+heat_tree(
+            node_label = taxon_names,
+      #      data = "diff_table", 
+            node_size = n_obs,
+            node_color = log2_median_ratio,
+            node_color_interval = c(-3, 3), # The range of `log2_median_ratio` to display
+            node_color_range = c("cyan", "gray", "tan"), # The color palette used
+            layout = "davidson-harel",
+            initial_layout = "reingold-tilford")
+
+ } else {
+
+set.seed(1)
+output<-heat_tree_matrix(taxmap_obj,
+                         data = "diff_table", # this is the table with the data you want to plot
+                         node_size = n_obs, # n_obs is a function that calculates, in this case, the number of OTUs per taxon
+                         node_label = taxon_names,
+                         node_color = log2_median_ratio, # A column from `taxmap_obj$data$diff_table_3treatments`
+                         node_color_range = diverging_palette(), # The built-in palette for diverging data
+                         node_color_interval = c(-3, 3), # The range of `log2_median_ratio` to display
+                         edge_color_interval = c(-3, 3), # The range of `log2_median_ratio` to display
+                         node_size_axis_label = "Number of OTUs",
+                         node_color_axis_label = "Log2 ratio median proportions",
+                         layout = "davidson-harel", # The primary layout algorithm
+                         initial_layout = "reingold-tilford") # The layout algorithm that initializes node locations
+
+   
+   
+ }
+
+
+# clearly define the output object you will get from the function
+return(output)   
+
+
+}
+
+
+#define function that calculates proportion tests between 2 phyloseq objects
+fisher_all_taxa_groups<-function(ps_important_taxa, ps_all_taxa){
+
+#**********************************************#
+############# fisher_all_taxa_groups ################
+#**********************************************#
+
+# this function takes 2 phyloseq objects as 2 arguments:
+# ps_important_taxa =  a subset of imporntant taxa, such as ASVs tagged as important by differential abundance, random forest, and netowrk analysis
+# ps_all_taxa = the full phyloseq objects from where you obtained the imporntat subset (and likely your input for differential abundance, random forest, and netowork analysis)
+
+# Then it runs a fisher test, comparing the proportions of every taxonomic level accuting more than twice in both datasets
+# it's just a test to compare proportions - is 6 out of 17 a similar proportion to 193 out of 2243?
+
+  
+  
+# first, get the taxonomic groups of the taxa defined as important
+  
+  #this will get us a list of (taxa_level) that appears in the important subset more than once
+  imp_phylum_l<-as.character(tax_table(ps_important_taxa)[,"Phylum"]) # gets a char vector  of "families" shown as relevant
+  imp_phylum_l<-imp_phylum_l[imp_phylum_l != "p__uncultured"] # removes any taxonomy set as "uncultured"
+  imp_phylum_l<-names(which(table(imp_phylum_l)>2))%>% # get names of taxa that occur ate least 1 time NOTE: CHANGED FROM >2
+    na.omit()%>% #remove NA from classifications
+    unique()%>%  #dereplicates repetitive values (avoids "f__Chitinophagaceae" "f__Chitinophagaceae" "f__Oxalobacteraceae")
+    as.list(c()) # save the dereplicated values as a list
+  
+  # now, perfom the same as above for every taxa level... it's hard-coded, but it works well enough. Pedro tried automating this and gave up after a few hours
+  imp_class_l<-as.character(tax_table(ps_important_taxa)[,"Class"]) 
+  imp_class_l<-imp_class_l[imp_class_l != "c__uncultured"] 
+  imp_class_l<-names(which(table(imp_class_l)>2))%>% 
+    na.omit()%>% 
+    unique()%>%  
+    as.list(c()) 
+  
+  imp_order_l<-as.character(tax_table(ps_important_taxa)[,"Order"])
+  imp_order_l<-imp_order_l[imp_order_l != "o__uncultured"]
+  imp_order_l<-names(which(table(imp_order_l)>2))%>%
+    na.omit()%>% 
+    unique()%>%
+    as.list(c()) 
+  
+  imp_fam_l<-as.character(tax_table(ps_important_taxa)[,"Family"])
+  imp_fam_l<-imp_fam_l[imp_fam_l != "f__uncultured"]
+  imp_fam_l<-names(which(table(imp_fam_l)>2))%>%
+    na.omit()%>% 
+    unique()%>% 
+    as.list(c()) 
+  
+  imp_genus_l<-as.character(tax_table(ps_important_taxa)[,"Genus"])
+  imp_genus_l<-imp_genus_l[imp_genus_l != "g__uncultured"]
+  imp_genus_l<-names(which(table(imp_genus_l)>2))%>%
+    na.omit()%>% 
+    unique()%>% 
+    as.list(c()) 
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  # second, get the number of taxa occuring in each taxonomic group, within the imporntat taxa subset
+  # note: using phyloseq::subset_taxa with a for loop will cause issues as your taxa is intepreted as "i"! to avoid this, use phyloseq::prune_taxa instead
+  
+  
+  
+  #make one empty lists to store results
+  target_in_important_n<-list()
+  
+  # obtain the number of reads of the target taxa in the important subset
+  for(i in imp_phylum_l) { #for every Phylum "i" with representatives defined as important....
+    target_in_important_n[i]<-phyloseq::ntaxa(prune_taxa(taxa = tax_table(ps_important_taxa)[,"Phylum"] %in% i, # get only the taxa that belong to that particular phylum "i", then define the number of taxa in there, then save it in the empty list we just made to store the results
+                                                         x = ps_important_taxa))
+  }
+  
+  # now, perfom the same as above for every taxa level... it's hard-coded, but it works well enough. Pedro tried automating this and gave up after a few hours
+  for(i in imp_class_l) {
+    target_in_important_n[i]<-phyloseq::ntaxa(prune_taxa(taxa = tax_table(ps_important_taxa)[,"Class"] %in% i,
+                                                         x = ps_important_taxa))
+  }
+  
+  for(i in imp_order_l) {
+    target_in_important_n[i]<-phyloseq::ntaxa(prune_taxa(taxa = tax_table(ps_important_taxa)[,"Order"] %in% i,
+                                                         x = ps_important_taxa))
+  }
+  
+  
+  for(i in imp_fam_l) {
+    target_in_important_n[i]<-phyloseq::ntaxa(prune_taxa(taxa = tax_table(ps_important_taxa)[,"Family"] %in% i,
+                                                         x = ps_important_taxa))
+  }
+  
+  for(i in imp_genus_l) {
+    target_in_important_n[i]<-phyloseq::ntaxa(prune_taxa(taxa = tax_table(ps_important_taxa)[,"Genus"] %in% i,
+                                                         x = ps_important_taxa))
+  }
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  # third, get the number of taxa occuring in each taxonomic group, within the full dataset 
+  
+  #make one empty lists to store results
+  target_in_all_n<-list()
+  
+  # obtain the number of reads of the target taxa in the important subset
+  for(i in imp_phylum_l) { #for every Phylum "i" with representatives defined as important....
+    target_in_all_n[i]<-phyloseq::ntaxa(prune_taxa(taxa = tax_table(ps_all_taxa)[,"Phylum"] %in% i, # get only the taxa that belong to that particular phylum "i", then define the number of taxa in there, then save it in the empty list we just made to store the results
+                                                   x = ps_all_taxa))
+  }
+  
+  # now, perfom the same as above for every taxa level... it's hard-coded, but it works well enough. Pedro tried automating this and gave up after a few hours
+  for(i in imp_class_l) {
+    target_in_all_n[i]<-phyloseq::ntaxa(prune_taxa(taxa = tax_table(ps_all_taxa)[,"Class"] %in% i,
+                                                   x = ps_all_taxa))
+  }
+  
+  for(i in imp_order_l) {
+    target_in_all_n[i]<-phyloseq::ntaxa(prune_taxa(taxa = tax_table(ps_all_taxa)[,"Order"] %in% i,
+                                                   x = ps_all_taxa))
+  }
+  
+  
+  for(i in imp_fam_l) {
+    target_in_all_n[i]<-phyloseq::ntaxa(prune_taxa(taxa = tax_table(ps_all_taxa)[,"Family"] %in% i,
+                                                   x = ps_all_taxa))
+  }
+  
+  for(i in imp_genus_l) {
+    target_in_all_n[i]<-phyloseq::ntaxa(prune_taxa(taxa = tax_table(ps_all_taxa)[,"Genus"] %in% i,
+                                                   x = ps_all_taxa))
+  }
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  # now, get the total number of taxa in the imporntat subset and in the full dataset
+  
+  # all important taxa
+  all_taxa_in_important_n<-phyloseq::ntaxa(ps_important_taxa)
+  
+  #all taxa 
+  all_taxa_in_all_n<-phyloseq::ntaxa(ps_all_taxa)
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  # now perform fisher tests over lists; check online tutorials for fisher.test() if need
+  
+  # this contigency table: (summed marginal totals is equal to the total number of taxa the the full object)
+  fisher_result<-mapply(function (target_in_important_n,target_in_all_n)
+    fisher.test(matrix(c(target_in_important_n, 
+                         all_taxa_in_important_n - target_in_important_n, 
+                         target_in_all_n - target_in_important_n, 
+                         all_taxa_in_all_n - all_taxa_in_important_n - target_in_all_n),
+                       ncol=2),alternative = "greater" ), 
+    target_in_all_n = target_in_all_n,
+    target_in_important_n = target_in_important_n,
+    SIMPLIFY = FALSE)
+  
+  return(fisher_result)
+  
+}
+
+#define function that puts fisher tests in metacoder heat trees
+fisher_to_heatTree<-function(fisher_output, ps_important_taxa){
+#**********************************************#
+############# fisher_to_heatTree ################
+#**********************************************#
+  
+# this function takes 1 phyloseq object and the putput of the fisher_all_taxa_groups() function as 2 arguments:
+# fisher_output =  The output of the function defined above, fisher_all_taxa_groups
+# ps_important_taxa = a phtloseq object with the taxa classified as "important". it is the same input as you used in the function fisher_all_taxa_groups  
+
+# this function will:
+  # 1)  create a taxmap object from the phyloseq object
+  # 2)  extract the p values from the fisher test and apply an fdr correction
+  # 3)  extract the taxa names form the heat tree, and match it to the p values of the fisher test
+  # 4)  extract the odds ratio from the fisher test and add it to the extracted p values adn taxonomies
+  # 5)  creates a heat map of the important taxa, with colour for adjusted p values and node size for odds ratio
+
+  
+  
+#######################################
+######## make metacoder object ######## 
+#######################################
+imp_heat_ps<-ps_important_taxa
+
+#remove unecessary taxonomic indo (dada2id, "S__" and" above_selected)
+tax_table(imp_heat_ps)<-tax_table(imp_heat_ps)[,2:7]
+
+# let's remove the "r__"ranks from the taxonomy, they can be useful but will pollute our plot
+#tax_table(imp_heat_ps)[, colnames(tax_table(imp_heat_ps))] <- gsub(pattern = "[a-z]__", # regular expression pattern to search for
+ #                                                                  x = tax_table(imp_heat_ps)[, colnames(tax_table(imp_heat_ps))], # "df"
+  #                                                                 replacement = "") # replacement for pattern
+
+# transform from phyloseq to  taxmap object
+imp_heat<-parse_phyloseq(imp_heat_ps)
+
+
+
+#######################################
+######## aplly fdr to fisher ######## 
+#######################################
+
+#apply FDR correction to the p values
+
+  #single df with all p values
+  pvector<-do.call(rbind.data.frame, map(fisher_output,1))
+  
+  # adjust the p value with fdr, then save as a list
+  adjusted_p<-p.adjust(p = pvector[[1]],
+                          method = "fdr")%>%
+                      as.list()
+  # adjust names
+  names(adjusted_p)<-names(fisher_output)
+
+  
+
+#this is the name that mustch match our fisher p list
+taxon_id_metacoder<-lapply(imp_heat$taxa, function (x)
+                                                    x$get_name())%>%
+                                                    map(1)
+
+
+# now turn that list into a df
+taxon_id_metacoder<-do.call(rbind.data.frame, map(taxon_id_metacoder,1))
+
+# and change column name
+colnames(taxon_id_metacoder)<-"taxa_id"
+
+# truns the p values into a dataframe
+adjusted_p_input<-as.data.frame(t(as.data.frame(adjusted_p)))%>%
+  rownames_to_column()
+
+#change column names
+colnames(adjusted_p_input)<-c("taxa_id", "fdr_p")
+  
+# now join both df
+fdr_for_heatTree<-left_join(taxon_id_metacoder,
+                            adjusted_p_input,
+                            by = "taxa_id")
+
+
+
+#######################################################################
+################### add fold changes! ########################################
+#######################################################################
+
+
+# get odds ratio for each taxa
+odd_list<- map(fisher_output,3)%>%
+  map(1)
+
+# truns the p values into a dataframe
+odd_list<-as.data.frame(t(as.data.frame(odd_list)))%>%
+  rownames_to_column()
+
+#change column names
+colnames(odd_list)<-c("taxa_id", "odds_ratio")
+
+# now join both df
+fisher_for_heatTree<-left_join(fdr_for_heatTree,
+                            odd_list,
+                            by = "taxa_id")
+
+
+
+
+#NAs will crash metadore. let's change them with 0.9999 for now
+fisher_for_heatTree[is.na(fisher_for_heatTree)]<-"1"
+
+#change structure to numeric
+fisher_for_heatTree$fdr_p<-as.numeric(fisher_for_heatTree$fdr_p)
+fisher_for_heatTree$odds_ratio<-as.numeric(fisher_for_heatTree$odds_ratio)
+
+
+#now let's dim p values above 0.1, or else we can get counfounded
+#fisher_for_heatTree$fdr_p[fisher_for_heatTree$fdr_p>0.1]<-1
+
+
+
+
+
+
+
+#######################################################################
+############### now plot the heat tree ############### 
+#######################################################################
+
+
+
+set.seed(1)
+      output<- heat_tree(imp_heat,
+                 node_size = fisher_for_heatTree$odds_ratio, # n_obs is a function that calculates, in this case, the number of OTUs per taxon
+                 node_color = fisher_for_heatTree$fdr_p,
+                 node_label = taxon_names,
+                 node_size_axis_label = "Size: oods_ratio",
+                 node_color_interval = c(0, 0.15),
+                 edge_color_interval = c(0, 0.15),
+                 node_color_range = c("darkgreen", "seagreen", "yellowgreen", "grey"),
+                 edge_color_range = c("darkgreen", "seagreen", "yellowgreen", "grey"),
+                 node_color_axis_label = "Color: FDR-adjusted p",
+                 layout = "davidson-harel", # The primary layout algorithm
+                 initial_layout = "reingold-tilford") # The layout algorithm that initializes node locations
+
+      return(output)
+}
+
+# define function to extract significat p values from the fisher output into a df(filtered to p<0.1)
+fisherOut_to_df_pfilter<-function(fisher_all_taxa_groups_output){
+  
+  #single df with all p values
+  pvector<-do.call(rbind.data.frame, map(fisher_all_taxa_groups_output,1))
+  # odsvector<-do.call(rbind.data.frame, map(fisher_all_taxa_groups_output,3)) # we might want to include odds ratio with this
+  
+  # adjust the p value with fdr, then save as a list
+  adjusted_p<-p.adjust(p = pvector[[1]],
+                          method = "fdr")%>%
+                      as.list()
+  # adjust names
+  names(adjusted_p)<-names(fisher_all_taxa_groups_output)
+
+  # adjust df format
+  adjusted_p_df<- as.data.frame(unlist(adjusted_p))
+  
+  #move rownames
+  adjusted_p_df<-rownames_to_column(adjusted_p_df,var = "taxa" )
+  
+  #change column names
+  colnames(adjusted_p_df)<-c("taxa","pvalue")
+  
+  #filter based on p values
+  adjusted_p_df<-adjusted_p_df[adjusted_p_df$pvalue <0.1,] # this column name can be a problem
+
+  return(adjusted_p_df)
+
+
+}
+
+
+
+
+```
+
+
+###Metacoder with Pedro: use fisher test on diff abund output
+```{r}
+load("./05_Differential_abundance/Objects/twotests_MeJA_Bac_ps_unnorm_31plants.RData")
+load("./05_Differential_abundance/Objects/MeJA_unnorm_Bac_ps_l_31plants.RData")
+
+#MeJA_Bac
+#run custom function, making a fisher tests that compares proportions of each taxa in the diff_abund list to the rest of the dataset
+MeJA_Bac_fisher_out_v2 <-mapply(function(x,y) 
+  fisher_all_taxa_groups(ps_important_taxa =  x ,
+                                  ps_all_taxa = y),
+  x = twotests_MeJA_Bac_ps_unnorm_31plants,
+  y = MeJA_unnorm_Bac_ps_l_31plants,
+  SIMPLIFY = FALSE)
+
+#Filter out plants with 0 taxa detected as "important"
+f_MeJA_Bac_fisher_out_v2 <- MeJA_Bac_fisher_out_v2[lapply(MeJA_Bac_fisher_out_v2,length)>0]
+
+#run custom function over lists of fisher test outputs
+MeJA_Bac_df_pval_fisherComparison_l<-lapply(f_MeJA_Bac_fisher_out_v2, fisherOut_to_df_pfilter)
+
+# make a table of p values <0.1
+MeJA_Bac_df_pval_fisherComparison<-do.call(rbind.data.frame,MeJA_Bac_df_pval_fisherComparison_l)
+table(MeJA_Bac_df_pval_fisherComparison_l$taxa)%>%sort
+
+write.table(MeJA_Bac_df_pval_fisherComparison, file="./05_Differential_abundance/Results/FisherHeattree_onTwoTestsASVs/MeJA_Bac_PerPlant_df_pval_fisherComparison_l_DAASVs.txt",
+sep = "\t", quote = F, row.names = T)
+
+#SA_Bac
+load("./05_Differential_abundance/Objects/twotests_SA_Bac_ps_unnorm_32plants.RData")
+load("./05_Differential_abundance/Objects/SA_unnorm_Bac_ps_l_32plants.RData")
+
+#SA_Bac
+#run custom function, making a fisher tests that compares proportions of each taxa in the diff_abund list to the rest of the dataset
+SA_Bac_fisher_out_v2 <-mapply(function(x,y) 
+  fisher_all_taxa_groups(ps_important_taxa =  x ,
+                                  ps_all_taxa = y),
+  x = twotests_SA_Bac_ps_unnorm_32plants,
+  y = SA_unnorm_Bac_ps_l_32plants,
+  SIMPLIFY = FALSE)
+
+#Filter out plants with 0 taxa detected as "important"
+f_SA_Bac_fisher_out_v2 <- SA_Bac_fisher_out_v2[lapply(SA_Bac_fisher_out_v2,length)>0]
+
+#run custom function over lists of fisher test outputs
+SA_Bac_df_pval_fisherComparison_l<-lapply(f_SA_Bac_fisher_out_v2, fisherOut_to_df_pfilter)
+
+# make a table of p values <0.1
+SA_Bac_df_pval_fisherComparison<-do.call(rbind.data.frame,SA_Bac_df_pval_fisherComparison_l)
+
+write.table(SA_Bac_df_pval_fisherComparison, file="./05_Differential_abundance/Results/FisherHeattree_onTwoTestsASVs/SA_Bac_PerPlant_df_pval_fisherComparison_l_DAASVs.txt",
+sep = "\t", quote = F, row.names = T)
+
+
+#MeJA_Fun
+load("./05_Differential_abundance/Objects/twotests_MeJA_Fun_ps_unnorm_28plants.RData")
+load("./05_Differential_abundance/Objects/MeJA_unnorm_Fun_ps_l_28plants.RData")
+
+#MeJA_Fun
+#run custom function, making a fisher tests that compares proportions of each taxa in the diff_abund list to the rest of the dataset
+MeJA_Fun_fisher_out_v2 <-mapply(function(x,y) 
+  fisher_all_taxa_groups(ps_important_taxa =  x ,
+                                  ps_all_taxa = y),
+  x = twotests_MeJA_Fun_ps_unnorm_28plants,
+  y = MeJA_unnorm_Fun_ps_l_28plants,
+  SIMPLIFY = FALSE)
+
+#Filter out plants with 0 taxa detected as "important"
+f_MeJA_Fun_fisher_out_v2 <- MeJA_Fun_fisher_out_v2[lapply(MeJA_Fun_fisher_out_v2,length)>0]
+
+#run custom function over lists of fisher test outputs
+MeJA_Fun_df_pval_fisherComparison_l<-lapply(f_MeJA_Fun_fisher_out_v2, fisherOut_to_df_pfilter)
+
+# make a table of p values <0.1
+MeJA_Fun_df_pval_fisherComparison<-do.call(rbind.data.frame,MeJA_Fun_df_pval_fisherComparison_l)
+
+write.table(MeJA_Fun_df_pval_fisherComparison, file="./05_Differential_abundance/Results/FisherHeattree_onTwoTestsASVs/MeJA_Fun_PerPlant_df_pval_fisherComparison_l_DAASVs.txt",
+sep = "\t", quote = F, row.names = T)
+
+
+
+#SA_Fun
+load("./05_Differential_abundance/Objects/twotests_SA_Fun_ps_unnorm_29plants.RData")
+load("./05_Differential_abundance/Objects/SA_unnorm_Fun_ps_l_29plants.RData")
+
+
+#SA_Fun
+#run custom function, making a fisher tests that compares proportions of each taxa in the diff_abund list to the rest of the dataset
+SA_Fun_fisher_out_v2 <-mapply(function(x,y) 
+  fisher_all_taxa_groups(ps_important_taxa =  x ,
+                                  ps_all_taxa = y),
+  x = twotests_SA_Fun_ps_unnorm_29plants,
+  y = SA_unnorm_Fun_ps_l_29plants,
+  SIMPLIFY = FALSE)
+
+#Filter out plants with 0 taxa detected as "important"
+f_SA_Fun_fisher_out_v2 <- SA_Fun_fisher_out_v2[lapply(SA_Fun_fisher_out_v2,length)>0]
+
+#run custom function over lists of fisher test outputs
+SA_Fun_df_pval_fisherComparison_l<-lapply(f_SA_Fun_fisher_out_v2, fisherOut_to_df_pfilter)
+
+# make a table of p values <0.1
+SA_Fun_df_pval_fisherComparison<-do.call(rbind.data.frame,SA_Fun_df_pval_fisherComparison_l)
+
+write.table(SA_Fun_df_pval_fisherComparison, file="./05_Differential_abundance/Results/FisherHeattree_onTwoTestsASVs/SA_Fun_PerPlant_df_pval_fisherComparison_l_DAASVs.txt",
+sep = "\t", quote = F, row.names = T)
+
+```
+
+
+###Metacoder with Pedro: put fisher tests results ina  tree
+```{r}
+#plor one species opn heat tree (fisher tests on deseq output)
+fisher_to_heatTree(fisher_output = fisher_out,
+                   ps_important_taxa =MeJA_Bac_conca_ps$At )
+
+
+```
+
+
+###Test effect of not filtering absent ASVs from the plants on standard DeSeq output
+```{r}
+#MeJA_Bac
+#Standard DESeq
+stddds2withfilt_Wald_MeJA_Bac <- lapply(dds_MeJA_Bac_ps, function(x) 
+                  DESeq(x, 
+                  test="Wald",  
+                  minReplicatesForReplace=Inf,
+                  fitType = "local")) 
+
+save(stddds2withfilt_Wald_MeJA_Bac, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/stddds2withfilt_Wald_MeJA_Bac.RData")
+
+#Dataframe generation
+res_stddds2withfilt_Wald_MeJA_Bac <- lapply(stddds2withfilt_Wald_MeJA_Bac, function(x) results(x, contrast = c("Stress", "MeJA", "Control")))
+
+save(res_stddds2withfilt_Wald_MeJA_Bac, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/res_stddds2withfilt_Wald_MeJA_Bac.RData")
+
+#Filter to only p adjusted under alpha
+alpha = 0.05
+sigtab_stddds2withfilt_Wald_MeJA_Bac <- lapply(res_stddds2withfilt_Wald_MeJA_Bac, function(x) x[which(x$padj < alpha), ])
+
+save(sigtab_stddds2withfilt_Wald_MeJA_Bac, 
+     file = "./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/sigtab_stddds2withfilt_Wald_MeJA_Bac.RData")
+
+
+#Take significant asvs from each test in a vector
+Load("./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/sigtab_stddds2_Wald_MeJA_Bac.RData")
+MeJA_Bac_DESeqWald_ASVs_unfilt <- lapply(sigtab_stddds2_Wald_MeJA_Bac, function(x) rownames(x))
+MeJA_Bac_DESeqWald_ASVs_filt <- lapply(sigtab_stddds2withfilt_Wald_MeJA_Bac, function(x) rownames(x))
+
+#Check if there's differences
+diff_filt_unfilt_stddds <- setdiff(MeJA_Bac_DESeqWald_ASVs_filt, MeJA_Bac_DESeqWald_ASVs_unfilt)
+#no differences
+```
+

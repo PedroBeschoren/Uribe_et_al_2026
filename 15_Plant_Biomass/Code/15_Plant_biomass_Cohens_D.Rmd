@@ -1,0 +1,351 @@
+---
+title: "15_Plant_Biomass_cohen's_D"
+author: "Zulema Carracedo Lorenzo"
+date: "August 25, 2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+# This script is based in the script 10_plant_traits from the MeJA pilot and written by Marcela. 
+
+#During the experiment, shoot plant biomass was measured to characterize the plant's phenotypic response to the different stress treatments. As the species of the experiment are phenotypically different *per se* we compared the effects of the treatments between them using Cohen's D 
+
+# 15.0 set up working environemnt
+
+## 15.01 load libraries, improve memory use
+
+```{r results="hide"}
+# this will load all key libraries for the whole project
+#source("./renv/0_load_libraries.R")
+
+# packages needed for Cohen's D
+library(effsize)    
+library(lsr)
+
+#Load the metadata
+metadata <- read.csv("./Data/mapping_file_generation/Plant_phenotype_metadata.csv")
+
+# increases memory limit used by R
+memory.limit(size = 350000)
+```
+
+
+## Settings for plots
+```{r}
+# Setting up white background for plots
+
+theme_set(theme_bw())
+
+# Set colors per stress
+
+color_stress <- c("#E69F00", "#009E73") #"MeJA", "SA"
+
+
+# Set axis looks
+
+axis_looks <- theme(axis.text.x = element_text(colour = "black", size = 9,
+                                               
+                                               face = "bold", angle=0, hjust=0.5))+
+  
+  theme(axis.text.y = element_text(colour = "black", size = 9, face = "bold"))+
+  
+  theme(axis.title=element_text(size=11, face = "bold"))+
+  
+  theme(axis.title.y = element_text(margin = ggplot2::margin(t = 0, r = 10, b = 0, l = 0)))+ #specify ggplot2 here to avoid "margin" function being overridden by a synonymous function from randomForest
+  
+  theme(panel.grid.major = element_blank(),
+        
+        panel.grid.minor = element_blank())+
+  
+  theme(legend.position="none")+
+  
+  theme(plot.background = element_blank(),
+        
+        panel.grid.major = element_blank(),
+        
+        panel.grid.minor = element_blank(),
+        
+        panel.border = element_blank())+
+  
+  theme(axis.line = element_line(colour = "black", 
+                                 
+                                 size = 0.8, linetype = "solid"))
+
+
+#stress_names <- c("control" = "Control", "MeJA_0.1" = "0.1 mM \n MeJA",
+
+#"MeJA_1.0" = "1 mM \n MeJA", "oral_secretion"="P. brassicae \n OS")
+
+
+
+```
+#Add species name column to data frame
+
+```{r}
+#Our metadata is missing the species names, it only contains species speed information. For our plots we need to have full names. Horrible hard code but didn't want to spend time figuring it out how to this in a more automated way...
+
+metadata <- mutate(metadata, Species =
+                     case_when(Sp_speed == "S1" ~ "Brassica_oleraceae Rivera_Slow",
+                               Sp_speed == "S2" ~ "Solanum_lycopersicum",
+                               Sp_speed == "S3" ~ "Nicotiana_benthamiana",
+                               Sp_speed == "S4" ~ "Cucumis_sativus",
+                               Sp_speed == "S5" ~ "Hirschfeldia_incana",
+                               Sp_speed == "S6" ~ "Iberis_amara",
+                               Sp_speed == "S7" ~ "Cochlearia_officinalis",
+                               Sp_speed == "S8" ~ "Isatis_tinctoria",
+                               Sp_speed == "S9" ~ "Brassica_oleraceae_Kimmeridge",
+                               Sp_speed == "S10" ~ "Sinapis_arvensis",
+                               Sp_speed == "S11" ~ "Diplotaxis_tenuifolia",
+                               Sp_speed == "M1" ~ "Brassica_oleraceae_Rivera",
+                               Sp_speed == "M2" ~ "Medicago_trunculata",
+                               Sp_speed == "M3" ~ "Brachypodium",
+                               Sp_speed == "M4" ~ "Arabidopsis_lyrata",
+                               Sp_speed == "M5" ~ "Descurainia_sophiades",
+                               Sp_speed == "M6" ~ "Camelina_sativa",
+                               Sp_speed == "M7" ~ "Turritis_glabra",
+                               Sp_speed == "M8" ~ "Brassica_nigra",
+                               Sp_speed == "M9" ~ "Brassica_rapa",
+                               Sp_speed == "M10" ~ "Sinapis_alba",
+                               Sp_speed == "M11" ~ "Sysimbrium_irio",
+                               Sp_speed == "F1" ~ "Brassica_oleraceae_Rivera_Fast",
+                               Sp_speed == "F2" ~ "Pisum_sativum",
+                               Sp_speed == "F3" ~ "Zea_mays",
+                               Sp_speed == "F4" ~ "Arabidopsis_thaliana",
+                               Sp_speed == "F5" ~ "Erysium_cheirantoides",
+                               Sp_speed == "F6" ~ "Barbarea_vulgaris",
+                               Sp_speed == "F7" ~ "Malcomia_maritima",
+                               Sp_speed == "F8" ~ "Lepidium_ruderale",
+                               Sp_speed == "F9" ~ "Lobularia_maritima",
+                               Sp_speed == "F10" ~ "Berteroa_incana",
+                               Sp_speed == "F11" ~ "Euclydium_syriacum",
+                     ))
+
+#We make a vector with the species names in the same order than in the phylogeny tree. In this way, our plots will have the species list organized like in the phylogeny. 
+
+#this was the old order
+phylogeny_vector <- c("Arabidopsis_lyrata", "Arabidopsis_thaliana", "Camelina_sativa", "Turritis_glabra","Erysium_cheirantoides","Malcomia_maritima","Descurainia_sophiades","Lepidium_ruderale", "Barbarea_vulgaris",  "Berteroa_incana", "Euclydium_syriacum", "Brassica_rapa",  "Brassica_oleraceae_Rivera","Hirschfeldia_incana","Sinapis_arvensis","Diplotaxis_tenuifolia","Brassica_nigra", "Isatis_tinctoria", "Sysimbrium_irio","Cochlearia_officinalis", "Lobularia_maritima", "Iberis_amara") #needed for the plots
+
+
+#Be aware that not all the species are in the phylogeny (for instance, species from other families). We will have to removed them at some point. Let's make a new metadata table containing only the species from our phylogeny. It will be useful for our plots.
+
+metadata_phylogeny <- subset(metadata, Species %in% phylogeny_vector)
+```
+
+
+
+## 15.1 Cohen's D
+
+```{r}
+ #making costume function using lsr package to calculate Cohen's D
+  
+cohensD_per_trait <- function(df, column, Sp_speed){
+                                    
+                                    
+                                    
+                     #df= data frame
+                     #column = column name with trait of interest, no quotes 
+                      #species = species name to be put in df, no quotes 
+                                    
+                       trait_name <- deparse(substitute(column)) #gets actual name (" ") of the column to be substituted
+                                    
+                       species_name <- deparse(substitute(Sp_speed)) #idem for species
+                       
+                       Control<- df %>%  #gets only values for control and the trait 
+                                      
+                       dplyr::filter(Stress == "Control") %>%  pull(trait_name) 
+                                    
+                                    
+                                    
+                                    MeJA <- df %>% 
+                                      
+                                      dplyr::filter(Stress == "MeJA") %>% pull(trait_name)
+                                    
+                                    
+                                    
+                                    SA <- df %>% 
+                                      
+                                      dplyr::filter(Stress == "SA") %>% pull(trait_name)
+                                    
+                          
+                                    
+                                    d_MeJA <- cohen.d(MeJA, Control) #calculates Cohen's D, Ctrl should be 2nd position
+                                    
+                                    d_SA <- cohen.d(SA, Control)   #so estimate matches the effect: 
+                                    
+                                              #(smaller or larger than ctrl)
+                                    
+                                    
+                                    
+                                    a <- as.data.frame(t(unlist(d_MeJA))) %>% #makes new df with values from Cohen's D estimation
+                                      
+                                      mutate(Stress="MeJA")           #and adds a new column with the treatment 
+                                    
+                                    
+                                    
+                                    b <- as.data.frame(t(unlist(d_SA))) %>% 
+                                      
+                                      mutate(Stress="SA")  
+                                    
+                                    
+                                     df.cohensD <- rbind(a,b)%>%             #merge 2 df's
+                                      
+                                      mutate(trait=trait_name)%>% #makes a new column with the trait name 
+                                      
+                                      mutate(Sp_speed=species_name)%>% #idem for species 
+                                      
+                                      mutate(eff_size=                #Adds a new column replacing numeric "magnitude" 
+                                               
+                                               case_when(             #values (1-4) coming from cohen.d function 
+                                                 
+                                                 magnitude == 1 ~ "negligible", #with the category written in text 
+                                                 
+                                                 magnitude == 2 ~ "small",
+                                                 
+                                                 magnitude == 3 ~ "medium",
+                                                 
+                                                 magnitude == 4 ~ "large"))%>%
+                                      
+                                      relocate(trait, Sp_speed, Stress, eff_size)
+                                    
+                                    
+                                    
+                                    
+                                    
+                                    return(df.cohensD) #returns full df 
+                                    
+                                  }  
+                                  
+                                  
+                                  
+#calculate cohen's D for shoot dry weight
+
+metadata <- drop_na(metadata) #we dont have shoot biomass for all plants, drop rows with no biomass value
+                        
+cohen_d_F1 <- cohensD_per_trait(filter(metadata, Sp_speed == "F1"), Shoot_.DryWeight, F1)
+cohen_d_F2 <- cohensD_per_trait(filter(metadata, Sp_speed == "F2"), Shoot_.DryWeight, F2)
+cohen_d_F3 <- cohensD_per_trait(filter(metadata, Sp_speed == "F3"), Shoot_.DryWeight, F3)
+cohen_d_F4 <- cohensD_per_trait(filter(metadata, Sp_speed == "F4"), Shoot_.DryWeight, F4)
+cohen_d_F5 <- cohensD_per_trait(filter(metadata, Sp_speed == "F5"), Shoot_.DryWeight, F5)
+cohen_d_F6 <- cohensD_per_trait(filter(metadata, Sp_speed == "F6"), Shoot_.DryWeight, F6)
+cohen_d_F7 <- cohensD_per_trait(filter(metadata, Sp_speed == "F7"), Shoot_.DryWeight, F7)
+cohen_d_F8 <- cohensD_per_trait(filter(metadata, Sp_speed == "F8"), Shoot_.DryWeight, F8)
+cohen_d_F9 <- cohensD_per_trait(filter(metadata, Sp_speed == "F9"), Shoot_.DryWeight, F9)
+cohen_d_F10 <- cohensD_per_trait(filter(metadata, Sp_speed == "F10"), Shoot_.DryWeight, F10)
+cohen_d_F11 <- cohensD_per_trait(filter(metadata, Sp_speed == "F11"), Shoot_.DryWeight, F11)
+cohen_d_M1 <- cohensD_per_trait(filter(metadata, Sp_speed == "M1"), Shoot_.DryWeight, M1)
+cohen_d_M2 <- cohensD_per_trait(filter(metadata, Sp_speed == "M2"), Shoot_.DryWeight, M2)
+cohen_d_M3 <- cohensD_per_trait(filter(metadata, Sp_speed == "M3"), Shoot_.DryWeight, M3)
+cohen_d_M4 <- cohensD_per_trait(filter(metadata, Sp_speed == "M4"), Shoot_.DryWeight, M4)
+cohen_d_M5 <- cohensD_per_trait(filter(metadata, Sp_speed == "M5"), Shoot_.DryWeight, M5)
+cohen_d_M6 <- cohensD_per_trait(filter(metadata, Sp_speed == "M6"), Shoot_.DryWeight, M6)
+cohen_d_M7 <- cohensD_per_trait(filter(metadata, Sp_speed == "M7"), Shoot_.DryWeight, M7)
+cohen_d_M8 <- cohensD_per_trait(filter(metadata, Sp_speed == "M8"), Shoot_.DryWeight, M8)
+cohen_d_M9 <- cohensD_per_trait(filter(metadata, Sp_speed == "M9"), Shoot_.DryWeight, M9)
+cohen_d_M10 <- cohensD_per_trait(filter(metadata, Sp_speed == "M10"), Shoot_.DryWeight, M10)
+cohen_d_M11 <- cohensD_per_trait(filter(metadata, Sp_speed == "M11"), Shoot_.DryWeight, M11)
+cohen_d_S1 <- cohensD_per_trait(filter(metadata, Sp_speed == "S1"), Shoot_.DryWeight, S1)
+cohen_d_S2 <- cohensD_per_trait(filter(metadata, Sp_speed == "S2"), Shoot_.DryWeight, S2)
+cohen_d_S3 <- cohensD_per_trait(filter(metadata, Sp_speed == "S3"), Shoot_.DryWeight, S3)
+cohen_d_S4 <- cohensD_per_trait(filter(metadata, Sp_speed == "S4"), Shoot_.DryWeight, S4)
+cohen_d_S5 <- cohensD_per_trait(filter(metadata, Sp_speed == "S5"), Shoot_.DryWeight, S5)
+cohen_d_S6 <- cohensD_per_trait(filter(metadata, Sp_speed == "S6"), Shoot_.DryWeight, S6)
+cohen_d_S7 <- cohensD_per_trait(filter(metadata, Sp_speed == "S7"), Shoot_.DryWeight, S7)
+cohen_d_S8 <- cohensD_per_trait(filter(metadata, Sp_speed == "S8"), Shoot_.DryWeight, S8)
+cohen_d_S9 <- cohensD_per_trait(filter(metadata, Sp_speed == "S9"), Shoot_.DryWeight, S9)
+cohen_d_S10 <- cohensD_per_trait(filter(metadata, Sp_speed == "S10"), Shoot_.DryWeight, S10)
+cohen_d_S11 <- cohensD_per_trait(filter(metadata, Sp_speed == "S11"), Shoot_.DryWeight, S11)
+
+all_cohen_df <- rbind(cohen_d_F1, cohen_d_F2, cohen_d_F3, cohen_d_F4, cohen_d_F5, cohen_d_F6, cohen_d_F7, cohen_d_F8, cohen_d_F9, cohen_d_F10, cohen_d_F11, cohen_d_M1, cohen_d_M2, cohen_d_M3, cohen_d_M4, cohen_d_M5, cohen_d_M6, cohen_d_M7, cohen_d_M8, cohen_d_M9, cohen_d_M10, cohen_d_M11, cohen_d_S1, cohen_d_S2, cohen_d_S3, cohen_d_S4, cohen_d_S5, cohen_d_S6, cohen_d_S7, cohen_d_S8, cohen_d_S9, cohen_d_S10, cohen_d_S11)
+
+#Add full species name
+species_naming_df <- metadata %>% dplyr::select(Sp_speed, Species) %>% unique() #creates df with sp_speed and species name information
+
+all_cohen_df <- merge(all_cohen_df, species_naming_df, by = "Sp_speed") #adds species names to cohen d results
+
+#save Cohen's D results
+save(all_cohen_df,  
+     file = "./15_Plant_Biomass/Objects/shoot_biomass_CohenD.RData")
+
+
+#estimate and interval need to be numeric to be use in plot
+
+all_cohen_df <- transform(all_cohen_df, estimate = as.numeric(estimate))
+all_cohen_df <- transform(all_cohen_df, conf.int.lower = as.numeric(conf.int.lower))
+all_cohen_df <- transform(all_cohen_df, conf.int.upper = as.numeric(conf.int.upper))
+#Select only the species from the phylogeny
+
+phylogeny_cohen_df <-  subset(all_cohen_df, Species %in% phylogeny_vector)
+
+phylogeny_cohen_df <- phylogeny_cohen_df %>%
+    arrange(match(Species, phylogeny_vector)) %>%
+    arrange(match(Stress, c("MeJA", "SA")))
+
+#write.csv(phylogeny_cohen_df, "./15_Plant_Biomass/Results/shoot_biomass_CohenD_tree.csv")
+
+
+
+```
+
+
+
+## 15.2 Plot (Supplementary Figure S3)
+
+```{r}
+phylogeny_cohen_df
+
+phylogeny_cohen_df$Species <- gsub("_", " ", phylogeny_cohen_df$Species) #fixes the species names
+
+
+ phylogeny_cohen_df <- phylogeny_cohen_df %>%  mutate(Sp_full_name =
+                                                     case_when(Species == "Brassica oleraceae Rivera" ~ "Brassica oleracea",
+                                                     TRUE ~ Species)) #Renaming B. oleracea
+
+
+phylogeny_vector <- c("Iberis amara", "Lobularia maritima", "Cochlearia officinalis", "Sysimbrium irio", "Isatis tinctoria", "Brassica nigra", "Diplotaxis tenuifolia", "Sinapis arvensis", "Hirschfeldia incana", "Brassica oleracea", "Brassica rapa", "Euclydium syriacum", "Berteroa incana", "Barbarea vulgaris", "Lepidium ruderale", "Descurainia sophiades",  "Malcomia maritima", "Erysium cheirantoides", "Turritis glabra", "Camelina sativa","Arabidopsis thaliana", "Arabidopsis lyrata")
+
+phylogeny_cohen_df$Sp_full_name <- factor(phylogeny_cohen_df$Sp_full_name, levels = phylogeny_vector)#arrange order for ggplot
+
+names(phylogeny_cohen_df)[names(phylogeny_cohen_df) == "Stress"] <- "Treatment" #change stress for treatment
+
+phylogeny_cohen_df <- phylogeny_cohen_df %>%
+  dplyr::mutate(
+    estimate = as.numeric(estimate),
+    conf.int.lower = as.numeric(conf.int.lower),
+    conf.int.upper = as.numeric(conf.int.upper)
+  )
+
+
+cohen_plot_phylogeny <- ggplot(phylogeny_cohen_df, aes(x=Sp_full_name, y=estimate, ymin=conf.int.lower, ymax=conf.int.upper,col=Treatment,fill=Treatment)) + 
+   geom_linerange(size=5, position=position_dodge(width = 0.5)) +
+                                    
+   geom_hline(aes(yintercept=0), lty=1) + 
+                                    
+   geom_hline(aes(yintercept=0.8), lty=2, colour="red") +
+                                    
+   geom_hline(aes(yintercept=-0.8), lty=2, colour="red") +
+                                    
+   geom_point(size=3, shape=20, colour="black", stroke = 0.5,
+                                               
+    position=position_dodge(width = 0.5)) +
+  geom_point(size=3, shape=21, colour="white", stroke = 0.5,position=position_dodge(width = 0.5)) +
+  scale_fill_manual(values=color_stress)+
+  scale_color_manual(values=color_stress)+
+ scale_x_discrete(name="Plant species") +
+  scale_y_continuous(name="Cohen's D estimate with 95% confidence interval", limits = c(-4,4))+
+  coord_flip() +
+  #theme_minimal() +
+  #theme(axis.text.y = element_text(colour = "black", size = 12,
+  #face = "bold", angle=0, hjust=0.5))+
+  theme() +
+  theme(legend.position="top", text = element_text(size = 18), axis.text.y=element_text(hjust=1, face=c(rep("italic", 25), "plain"))) +
+  facet_wrap(~ Treatment)
+
+ggsave(cohen_plot_phylogeny,
+       height = 10, width = 15, dpi=500,
+       file="./15_Plant_Biomass/Results/Shoot_biomass_CohenD_phylogeny_paper_Oct24.pdf")
+
+```
+
+
+
+

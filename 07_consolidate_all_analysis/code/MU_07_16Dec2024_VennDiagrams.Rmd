@@ -1,0 +1,136 @@
+---
+title: "MU_07_VennDiagrams"
+author: "Melissa"
+date: "2024-12-16"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r, echo =FALSE}
+#Set lib paths
+.libPaths("C:/Family_experiment/renv/library/R-4.1/x86_64-w64-mingw32")
+
+```
+
+```{r}
+library(ggVennDiagram)
+library(RColorBrewer)
+library(ggplot2)
+library(dplyr)
+library(ggpubr)
+
+set.seed(123)
+theme_set(theme_classic())
+
+```
+
+#Bac
+```{r}
+#ASVs Bacteria
+load("./07_consolidate_all_analysis/Results/DA_RF_NM_ASVs_intersect.RData")
+
+#Remove the fungi from the object
+DA_RF_NM_ASVs_intersect$MeJA_Fun_GoldenASVs <- NULL
+DA_RF_NM_ASVs_intersect$SA_Fun_GoldenASVs <- NULL
+
+#Simple Venn diagrams of shared not shared
+simple_Venn_Bac <- ggVennDiagram(DA_RF_NM_ASVs_intersect)
+```
+
+#Venn Separating up and down
+```{r}
+#Load LFC from Marce (https://github.com/PedroBeschoren/Family_experiment/blob/master/07_consolidate_all_analysis/code/MA_07_Annotated_phylotree_GoldenASVs.Rmd, Line325)
+#All unique ASVs should be there
+load("./07_consolidate_all_analysis/Results/Annotated_microbial_phylogenetic_tree/16S/df_complete.Rdata")
+
+#the column LFC_average_MeJA already has the number I can used it to divide between enriched and depleted...however, I think first I need to filter to only the MeJA ones and only the SA ones...
+#Filter to SA and MeJa specific ASVs
+MeJA_Bac_ASVs <- DA_RF_NM_ASVs_intersect$MeJA_Bac_GoldenASVs #130
+
+MeJA_df <- df_complete %>% 
+  filter(ASV %in% MeJA_Bac_ASVs)
+MeJA_df_up <- MeJA_df %>% 
+  filter(LFC_average_MeJA > 0)
+MeJA_df_up <- MeJA_df_up %>% 
+  select(ASV)
+MeJA_df_up <- as.vector(MeJA_df_up$ASV)
+
+MeJA_df_down <- MeJA_df %>% 
+  filter(LFC_average_MeJA < 0)
+MeJA_df_down <- MeJA_df_down %>% 
+  select(ASV)
+MeJA_df_down <- as.vector(MeJA_df_down$ASV)
+
+#SA
+SA_Bac_ASVs <- DA_RF_NM_ASVs_intersect$SA_Bac_GoldenASVs #138
+
+SA_df <- df_complete %>% 
+  filter(ASV %in% SA_Bac_ASVs)
+SA_df_up <- SA_df %>% 
+  filter(LFC_average_SA > 0)
+SA_df_up <- SA_df_up %>% 
+  select(ASV)
+SA_df_up <- as.vector(SA_df_up$ASV)
+
+SA_df_down <- SA_df %>% 
+  filter(LFC_average_SA < 0)
+SA_df_down <- SA_df_down %>% 
+  select(ASV)
+SA_df_down <- as.vector(SA_df_down$ASV)
+
+#List them
+updown_Bac <- list(MeJA_enriched = MeJA_df_up,
+                   MeJA_depleted = MeJA_df_down,
+                   SA_enriched = SA_df_up,
+                   SA_depleted = SA_df_down)
+
+updown_Venn_Bac <-ggVennDiagram(updown_Bac)
+
+
+```
+
+#Fun_silver asvs
+```{r}
+#ASVs Fungi
+load("./07_consolidate_all_analysis/Results/DA_RF_NM_ASVs_intersect.RData")
+
+#Remove the fungi from the object
+DA_RF_NM_ASVs_intersect$MeJA_Bac_GoldenASVs <- NULL
+DA_RF_NM_ASVs_intersect$SA_Bac_GoldenASVs <- NULL
+
+#Simple Venn diagrams of shared not shared
+simple_Venn_Fun <- ggVennDiagram(DA_RF_NM_ASVs_intersect)
+
+#Find the other intersect!
+```
+
+#Fun_goldenASVs
+```{r}
+load("./07_consolidate_all_analysis/Results/DA_ControlMeJA_ControlSA_ASVs_22sp.RData")
+load("./10_Machine_learning/r_objects/RF_ControlMeJA_ControlSA_ASVs_22sp.RData")
+load (file = "./04_Neutral_models/r_objects/differing_ASVs_above_below_l_22sp.RData")
+NM_ControlMeJA_ControlSA_ASVs_22sp<- differing_ASVs_above_below_l_22sp
+
+#Make sure all ASVs and taxonomies are unique inside their own lists (to prevent having one list with an ASV more than once)
+
+#ASVs
+DA_ControlMeJA_ControlSA_ASVs_22sp_unique <- lapply(DA_ControlMeJA_ControlSA_ASVs_22sp, function(x) unique(x))
+RF_ControlMeJA_ControlSA_ASVs_22sp_unique <- lapply(RF_ControlMeJA_ControlSA_ASVs_22sp, function(x) unique(x))
+NM_ControlMeJA_ControlSA_ASVs_22sp_unique <- lapply(NM_ControlMeJA_ControlSA_ASVs_22sp, function(x) unique(x))
+
+DA_RF_NM_ASVs_intersect <- mapply(function(x,y,z)
+Reduce(intersect, list(x,y,z)),
+x = DA_ControlMeJA_ControlSA_ASVs_22sp_unique,
+y = RF_ControlMeJA_ControlSA_ASVs_22sp_unique,
+z = NM_ControlMeJA_ControlSA_ASVs_22sp_unique,
+  SIMPLIFY = FALSE)
+
+#Remove the fungi from the object
+DA_RF_NM_ASVs_intersect$DA_MeJA_Bac_22sp <- NULL
+DA_RF_NM_ASVs_intersect$DA_SA_Bac_22sp <- NULL
+
+#Simple Venn diagrams of shared not shared
+simple_Venn_Fun_Golden <- ggVennDiagram(DA_RF_NM_ASVs_intersect)
+```
+

@@ -1,0 +1,886 @@
+---
+title: "1_loading_and_pre_processing"
+author: "Pedro Beschoren da Costa"
+date: "August 24, 2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+Code writen by Pedro and modified by Zulema to have unfiltered phyloseq object input for alpha diversity testing. 
+
+
+# 1.0 load all libraries, custom functions, setup environemnt
+```{r results="hide"}
+
+
+# loads all libraries 
+source("./renv/0_load_libraries.R")
+
+install.packages("remotes")
+remotes::install_github("benjjneb/decontam")
+library("decontam")
+
+# custom functions related to data loading and decontamination
+source("./01_Preprocessing/code/functions_loading_and_decontamination.R")
+
+# increases memory limit used by R
+memory.limit(size = 350000)
+
+```
+
+
+# 1.0 load microbiome data from biom file
+our data (processed in qiime2) was saved in BIOM format, making importing easier since there are less files to handle
+
+
+
+## 1.1.1 - Loading 16S data 
+our 16S data takes 7.3Gb in memory if not filtered before saving in the R environment. after filtering (removing host DNA and ASVs occuring less than 7 times) the object takes 2.1Gb, which is much more manageable
+```{r results="hide"}
+##### Loading 16S  data ##########
+
+# loads the OTU table, immediatetly saving it as a phyloseq OTU table (lighter than a df)
+raw_bac_otutab<-otu_table(object = read.table(file = "./data/Amplicon_sequencing/16S_seqtab_final.txt", 
+                                              header = TRUE,
+                                              row.names = 1, # first column has row names (ASV names)
+                                              check.names = FALSE), # prevents "X" to be added to column names, such as X49_16S,
+                           taxa_are_rows = TRUE)
+
+
+#updated tax
+sklearn_bac_taxtab<-read.table(file = "./data/Amplicon_sequencing/16S_taxonomy_sklearn.tsv", 
+                               header = TRUE,
+                               sep = "\t",
+                               row.names = 1, # first column has row names (ASV names)
+                               check.names = FALSE) # prevents "X" to be added to column names, such as X49_16S,
+
+# adjusts number and name of columns
+sklearn_bac_taxtab<- separate(data = sklearn_bac_taxtab,
+                               col = Taxon,
+                               into =c("Kingdom", 
+                                       "Phylum", 
+                                       "Class", 
+                                       "Order", 
+                                       "Family",
+                                       "Genus", 
+                                       "Species"),
+                               sep = ";")
+
+# change from d__Bacteria to k__bacteria, mathcing fungi dataset
+sklearn_bac_taxtab$Kingdom<-gsub("d__", "k__", sklearn_bac_taxtab$Kingdom)
+
+# saves taxa as phyloseq object
+sklearn_bac_taxtab<-tax_table(object = as.matrix(sklearn_bac_taxtab))
+
+#change name and remove old object
+raw_bac_taxtab<-sklearn_bac_taxtab
+rm(sklearn_bac_taxtab)
+
+# loads the representative sequences table, immediatetly saving it as a phyloseq OTU table (lighter than a df)
+raw_bac_refseq<-refseq(physeq = Biostrings::readDNAStringSet(filepath = "./data/Amplicon_sequencing/16S_repset.fasta", use.names = TRUE)) 
+taxa_names(raw_bac_refseq)<-gsub(" .*", "", taxa_names(raw_bac_refseq)) # drops taxonomy from ASV names
+
+# loads the mapping tile, immediatetly saving it as a phyloseq OTU table (lighter than a df)
+raw_bac_metadata<-sample_data(object = read.table(file = "./data/Amplicon_sequencing/Mapping_file_16S_Family_experiment.txt", 
+                                                  header = TRUE,
+                                                  sep = "\t",
+                                                  row.names = 1, # first column has row names (ASV names)
+                                                  check.names = FALSE)) # prevents "X" to be added to column names, such as X49_16S,
+
+# build the main 16S phyloseq object by putting all these phyloseq-class objects (otu table, tax table, ref seq, metadta) into a single ps
+raw_bac_ps<-merge_phyloseq(raw_bac_otutab,
+                           raw_bac_taxtab,
+                           raw_bac_refseq,
+                           raw_bac_metadata)
+
+# remove old objects to reduce memory use
+rm(raw_bac_otutab,raw_bac_taxtab,raw_bac_refseq,raw_bac_metadata)
+
+# change names from ASV to fASV, so they can be distinguished from bacterial ASVs
+taxa_names(raw_bac_ps)<-paste("b", taxa_names(raw_bac_ps), sep = "")
+tax_table(raw_bac_ps)<-gsub(" ", "", tax_table(raw_bac_ps)) # drops a space charather from taxa names. I don't know how that charather ended up in there
+
+# let's check the imported objects. Often errors will arise from typos when filling up the data sheets 
+otu_table(raw_bac_ps)[1:10,1:10]
+sample_data(raw_bac_ps)[1:10,1:10]
+tax_table(raw_bac_ps)[1:10,1:6]
+refseq(raw_bac_ps)
+
+
+
+# run garbage collection after creating large objects
+gc()
+
+```
+
+
+
+
+## 1.1.2 - Loading ITS data 
+This will load all the essential data (OTU frequencies,  metadata, taxonomy) for a single phyloseq object
+```{r results="hide"}
+
+# loads the OTU table, inmediatetly saving it as a phyloseq OTU table (lighter than a df)
+raw_fun_otutab<-otu_table(object = read.table(file = "./data/Amplicon_sequencing/ITS_seqtab_final.txt", 
+                                              header = TRUE,
+                                              row.names = 1, # first column has row names (ASV names)
+                                              check.names = FALSE), # prevents "X" to be added to column names, such as X49_ITS,
+                           taxa_are_rows = TRUE)
+
+
+
+#updated tax
+sklearn_fun_taxtab<-read.table(file = "./data/Amplicon_sequencing/ITS_taxonomy_sklearn.tsv", 
+                               header = TRUE,
+                               sep = "\t",
+                               row.names = 1, # first column has row names (ASV names)
+                               check.names = FALSE) # prevents "X" to be added to column names, such as X49_16S,
+
+# adjusts number and name of columns
+sklearn_fun_taxtab<- separate(data = sklearn_fun_taxtab,
+                               col = Taxon,
+                               into =c("Kingdom", 
+                                       "Phylum", 
+                                       "Class", 
+                                       "Order", 
+                                       "Family",
+                                       "Genus", 
+                                       "Species"),
+                               sep = ";")
+
+# saves taxa as phyloseq object
+sklearn_fun_taxtab<-tax_table(object = as.matrix(sklearn_fun_taxtab))
+
+# renames object, remve old version7
+raw_fun_taxtab<-sklearn_fun_taxtab
+rm(sklearn_fun_taxtab)
+
+
+
+# loads the representative sequences table, immediatetly saving it as a phyloseq OTU table (lighter than a df)
+raw_fun_refseq<-refseq(physeq = Biostrings::readDNAStringSet(filepath = "./data/Amplicon_sequencing/ITS_repset.fasta", use.names = TRUE)) 
+taxa_names(raw_fun_refseq)<-gsub(" .*", "", taxa_names(raw_fun_refseq)) # drops taxonomy from ASV names
+
+# loads the mapping tile, immediatetly saving it as a phyloseq OTU table (lighter than a df)
+raw_fun_metadata<-sample_data(object = read.table(file = "./data/Amplicon_sequencing/Mapping_file_ITS_Family_experiment.txt", 
+                                                  header = TRUE,
+                                                  sep = "\t",
+                                                  row.names = 1, # first column has row names (ASV names)
+                                                  check.names = FALSE)) # prevents "X" to be added to column names, such as X49_ITS,
+
+# build the main ITS phyloseq object by putting all these phyloseq-class objects (otu table, tax table, ref seq, metadta) into a single ps
+raw_fun_ps<-merge_phyloseq(raw_fun_otutab,
+                           raw_fun_taxtab,
+                           raw_fun_refseq,
+                           raw_fun_metadata)
+
+# remove old objects to reduce memory use
+rm(raw_fun_otutab,raw_fun_taxtab,raw_fun_refseq,raw_fun_metadata)
+
+# change names from ASV to fASV, so they can be distinguished from bacterial ASVs
+taxa_names(raw_fun_ps)<-paste("f", taxa_names(raw_fun_ps), sep = "")
+
+# let's check the imported objects. Often errors will arise from typos when filling up the data sheets 
+otu_table(raw_fun_ps)[1:10,1:10]
+sample_data(raw_fun_ps)[1:10,1:10]
+tax_table(raw_fun_ps)[1:10,1:7]
+refseq(raw_fun_ps)
+
+
+
+# run garbage collection after creating large objects
+gc()
+
+
+```
+
+
+
+
+# 1.2 - remove bad ASVs
+
+here we will remove sequences associated witht he host, background prokatyotes, low abundance ASVs, poorly identified sequences, and other bad ASVs
+
+## 1.2.1 - Remove non-bacterial sequences & filter ASVs
+note that the input data (380k taxa) has been pre-filtered to remove any ASVs that occur less than 3 times in the dataset. this was necessary bcause the dada2-associated taxonomy assingment tools could not assing taxonomies to the full dataset (700k taxa) with 1 GB ram on the HPC.
+
+details of host DNA contamination can be found in "./src/Amplicon_sequencing/functions/host_DNA_contamination.r"
+  * 35% of 16S reads are plastids
+  * 8% of 15S reads are mitochondria
+
+
+```{r}
+# here we see that sequences of only 50bp were still retained by the updated dada2 pipeline
+hist(as.data.frame(refseq(raw_bac_ps)@ranges)$width, breaks = 300)
+summary(as.data.frame(refseq(raw_bac_ps)@ranges)$width)
+
+# here we get rid of sequences shorter than 380bp. this reduced the total number of taxa by ~4k (from 384089 to 380244 taxa )
+raw_bac_ps<-prune_taxa(taxa = as.data.frame(refseq(raw_bac_ps)@ranges)$width>380,
+                       x = raw_bac_ps)
+
+
+# keeps only ASVs identified as bacterial
+raw_bac_ps<-subset_taxa(raw_bac_ps, Kingdom=="k__Bacteria") # drops from 380244 to 380019 taxa, barely any difference 
+
+# define library sizes as metadata before filtering
+raw_bac_ps@sam_data$library_sizes_prefiltering<-sample_sums(raw_bac_ps)
+
+# removes taxa occuring less than 8 times in the dataser, as VSEARCH standard
+#otu_table(raw_bac_ps) <- otu_table(raw_bac_ps)[which (rowSums(otu_table(raw_bac_ps)) > 7),]  #drops from 380K to 168K taxa, from 222M to 221M sequences (843k seqeunces removed)
+
+
+# filter ASV according samples (min 0 reads, present in 3 samples)
+#filter <- phyloseq::genefilter_sample(raw_bac_ps, filterfun_sample(function(x) x > 0), A = 3) 
+#raw_bac_ps <- prune_taxa(filter, raw_bac_ps) #drops from 168k to 72k taxa, drops from 221M  to 219M reads
+
+
+
+
+
+
+
+
+
+
+
+#define plastid, mitochondria and host plant contamination ps objects
+Mitochondria_ps<-subset_taxa(raw_bac_ps, Family == "f__Mitochondria" | Family == "Mitochondria")
+Plastid_ps<-subset_taxa(raw_bac_ps, Order == "o__Chloroplast" | Order == "Chloroplast") 
+host_plant_ps<-merge_phyloseq(Mitochondria_ps,Plastid_ps)
+
+#quick histogram showing plant DNA contamination
+hist(sample_sums(host_plant_ps)/sample_sums(raw_bac_ps)*100, breaks = 100)
+
+# define host plant 16S contamination as metadata
+raw_bac_ps@sam_data$Mitochondria_reads<-sample_sums(Mitochondria_ps)
+raw_bac_ps@sam_data$Plastid_reads<-sample_sums(Plastid_ps)
+raw_bac_ps@sam_data$Host_DNA_n_reads<-sample_sums(host_plant_ps)
+raw_bac_ps@sam_data$Host_DNA_contamination_pct<-sample_sums(host_plant_ps)/sample_sums(raw_bac_ps)*100
+
+# remove plant host sequences (plastid and mitochndrial DNA) 
+raw_bac_ps<-remove_Chloroplast_Mitochondria(raw_bac_ps) # drops from 72k to 69.9k taxa, from 219M to 121M reads (almost 45% of our 16S sequencing effort! that's about 12k Euro!)
+
+
+
+
+
+
+# add library sizes as part of metadata
+sample_data(raw_bac_ps)$library_size<-sample_sums(raw_bac_ps)
+
+#check librabzy size distribution
+hist(sample_data(raw_bac_ps)$library_size)
+summary(sample_data(raw_bac_ps)$library_size)
+sort(sample_data(raw_bac_ps)$library_size) #one sample has 0 reads
+
+# remove 1 sample with library size = 0  (non-informative; failed PCR/sequencing)
+raw_bac_ps<-subset_samples(raw_bac_ps, library_size >0)
+
+# run garbage collection after creating large objects
+gc()
+
+```
+
+
+
+
+## 1.2.2 - Remove non-fungal sequences & filter ASVs
+details of host DNA contamination can be found in "./src/Amplicon_sequencing/functions/host_DNA_contamination.r"
+  * ~0.15% of total reads are plant ITS
+  * ~5.77% of total reads are protozoa ITS
+  * ~9.92% of ITS reads are unidentified
+
+```{r}
+
+
+# define library sizes as metadata before filtering
+raw_fun_ps@sam_data$library_sizes_prefiltering<-sample_sums(raw_fun_ps)
+
+# removes taxa occuring less than 8 times in the dataser, as VSEARCH standard
+#otu_table(raw_fun_ps) <- otu_table(raw_fun_ps)[which (rowSums(otu_table(raw_fun_ps)) > 7),]  #drops from 15.5K to 14.1K taxa, only 6K reads removed
+
+# filter  samples (min 0 reads, present in 3 samples)
+#filter <- phyloseq::genefilter_sample(raw_fun_ps, filterfun_sample(function(x) x > 0), A = 3) 
+
+#raw_fun_ps <- prune_taxa(filter, raw_fun_ps) #drops from 14.1k to 3.1k taxa, drops from 206M  to 195M reads
+#rm(filter) # we no longer need this string
+
+# removes g__Malassezia, a known human pathogen (saunders et al 2012, https://journals.plos.org/plospathogens/article?id=10.1371/journal.ppat.1002701)
+raw_fun_ps<-prune_taxa(!(taxa_names(raw_fun_ps) %in% taxa_names(subset_taxa(raw_fun_ps, Genus=="g__Malassezia"))), raw_fun_ps) 
+
+
+
+
+
+
+
+# take  all plant ITS sequences here to calculate host contamination
+raw_PlantITS_ps<-subset_taxa(raw_fun_ps, Kingdom=="k__Viridiplantae") 
+
+# keeps only ASVs identified as fungal
+raw_fun_ps<-subset_taxa(raw_fun_ps, Kingdom=="k__Fungi") # drops from 18.5K to 15.5K taxa, from 206M reads to 201M reads
+
+# define ITS host contamination as sample emtadata
+raw_fun_ps@sam_data$Host_DNA_contamination_pct<-sample_sums(raw_PlantITS_ps)/sample_sums(raw_fun_ps)*100
+raw_fun_ps@sam_data$Host_DNA_n_reads<-sample_sums(raw_PlantITS_ps)
+
+#check final sequence lenght. ITS sequences smaller than 100bp should be discarded
+summary(raw_fun_ps@refseq@ranges@width)
+sort(raw_fun_ps@refseq@ranges@width) #only one sample has below 100bp, we keep it
+
+# add library sizes as part of metadata
+sample_data(raw_fun_ps)$library_size<-sample_sums(raw_fun_ps)
+sort(raw_fun_ps@refseq@ranges@width)
+
+#remove unecessary objects and collect garbage
+rm(raw_PlantITS_ps)
+gc()
+
+
+```
+
+
+#1.3  - Decontaminate phyloseq objects
+the decontam package will use blank DNA samples to remove possible contaminants. here we use a single custom function to run decontamination, generate plots, and return a clean phyloseq object
+
+We will also check the number of reads in a blank sample (average +SD) so we can compare those blank samples with libraries with low number of reads. samples that cannot be distinguished from a blank (in terms of library size) 
+
+
+##1.3.1. Decontaminate 16S
+
+```{r}
+#Pedro's function to decontaminate didn't work with the 16S data, to big dataset for my laptop. I did it then step by step
+
+# set negatives as TRUE in a  new column 
+  sample_data(raw_bac_ps)$is.neg <- sample_data(raw_bac_ps)$Stress  == "Blank" 
+  
+  # add library size to metadata
+  sample_data(raw_bac_ps)$library_size<-sample_sums(raw_bac_ps)
+  
+  # decontaminate! 
+  decontam_output_bac <- isContaminant(raw_bac_ps,
+                                   neg="is.neg",
+                                   batch = "Speed",
+                                   conc = "Amplicon_concentation_ngul",
+                                   method = "combined",
+                                   threshold= 0.05)  
+  
+  #save output 
+  save(decontam_output_bac, file = "./01_Preprocessing/r_objects/decontam_output_bac.RData")
+  
+  
+  table(decontam_output$contaminant) #260 ASVs contaminants     
+  which(decontam_output$contaminant)
+  
+
+  ## Check which taxa are contaminants:
+  ps_contam <- prune_taxa(decontam_output$contaminant, raw_bac_ps)
+  tax_table(ps_contam) #lots of most abundant ASVs
+  
+  plot_bar(ps_contam, "Phylum", fill="Class")
+  plot_bar(ps_contam, "Phylum", fill="Class", facet_grid=~Speed) #slow samples have more contaminants than medium and fast
+  #Proteobacteria and actinobacteria are the main contaminants
+  
+  #plot frequency of contaminant ASVs vs DNA concentration
+  plot_frequency(raw_bac_ps, taxa_names(raw_bac_ps)[sample(which(decontam_output_bac$contaminant),20)],
+                 conc="Amplicon_concentation_ngul")+
+    xlab("DNA concentration (ngul)")
+  
+  #Which samples have the highest abundance of contaminants?
+  p_cont <- plot_bar(ps_contam, fill="Phylum")
+  
+  #What proportion of our count data were removed as contaminants?
+  ps_noncontam <- prune_taxa(!decontam_output_bac$contaminant, raw_bac_ps)
+  
+  pre <- sum(sample_sums(raw_bac_ps))
+  post <- sum(sample_sums(ps_noncontam))
+  
+  (pre-post) / pre #only 0.0005%
+
+  #clean physeq object by removing blank samples
+  unfiltered_unnormalized_bac_ps <- subset_samples(ps_noncontam, Stress != "Blank") #37 blanks removed
+  
+  
+ # add library sizes as part of metadata
+sample_data(unfiltered_unnormalized_bac_ps)$library_size_decont<-sample_sums(unfiltered_unnormalized_bac_ps)
+
+# let's look into how many reads our blank had (average+sd) so we can compare those to libraries with very low number of reads
+blank_reads_bac<-sort(sample_sums(subset_samples(raw_bac_ps, Stress == "Blank")))
+plot(blank_reads_bac) #almost all below 5000 reads
+
+
+# now let's check the lower end of our library sizes
+
+sort(sample_sums(unfiltered_unnormalized_bac_ps))
+plot(sort(sample_sums(unfiltered_unnormalized_bac_ps)))
+summary(sample_sums(unfiltered_unnormalized_bac_ps))
+# 5 are below 5000 reads, just like the blanks
+# 12 samples are above 200.000, we also remove them
+
+unfiltered_unnormalized_bac_ps <- subset_samples(unfiltered_unnormalized_bac_ps, library_size_decont>5000)
+
+unfiltered_unnormalized_bac_ps <- subset_samples(unfiltered_unnormalized_bac_ps, library_size_decont<200000)
+
+plot(sort(sample_sums(unfiltered_unnormalized_bac_ps)))
+summary(sample_sums(unfiltered_unnormalized_bac_ps))
+
+#remove those ASVs with now 0 reads 
+unfiltered_unnormalized_bac_ps<-prune_taxa(taxa_sums(unfiltered_unnormalized_bac_ps) >0, unfiltered_unnormalized_bac_ps)
+
+
+# set sp_speed as factor, and then order it properly
+
+sample_data(unfiltered_unnormalized_bac_ps)$Sp_speed <- factor(sample_data(unfiltered_unnormalized_bac_ps)$Sp_speed, 
+                                 levels = c("F1","F2","F3","F4","F5","F6","F7","F8","F9","F10","F11","F12",
+                                            "M1","M2","M3","M4","M5","M6","M7","M8","M9","M10","M11","M12",
+                                            "S1","S2","S3","S4","S5","S6","S7","S8","S9","S10","S11","S12",
+                                            "pre_planting"))
+
+# set Sp_full_name as factor, and then order it according phylogeny
+
+sample_data(unfiltered_unnormalized_bac_ps)$Sp_full_name<- factor(sample_data(unfiltered_unnormalized_bac_ps)$Sp_full_name, 
+                                 levels = c("Arabidopsis_thaliana",
+                                            "Arabidopsis_lyrata",
+                                            "Camelina_sativa",
+                                            "Turritis_glabra",
+                                            "Erysium_cheirantoides",
+                                            "Malcomia_maritima",
+                                            "Barbarea_vulgaris",
+                                            "Lepidium_ruderale",
+                                            "Descurainia_sophiades",
+                                            "Brassica_nigra",
+                                            "Sinapis_arvensis",
+                                            "Sinapis_alba",
+                                            "Hirschfeldia_incana",
+                                            "Brassica_rapa",
+                                            "Brassica_oleraceae_Rivera_Fast",
+                                            "Brassica_oleraceae_Rivera_Medium",
+                                            "Brassica_oleraceae_Rivera_Slow",
+                                            "Brassica_oleraceae_Kimmeridge",
+                                            "Diplotaxis_tenuifolia",
+                                            "Sysimbrium_irio",
+                                            "Isatis_tinctoria",
+                                            "Cochlearia_officinalis",
+                                            "Lobularia_maritima",
+                                            "Iberis_amara",
+                                            "Berteroa_incana",
+                                            "Euclydium_syriacum",
+                                            "Solanum_lycopersicum",
+                                            "Nicotiana_benthamiana",
+                                            "Pisum_sativum",
+                                            "Medicago_truncatula",
+                                            "Zea_mays",
+                                            "Brachypodium_distachyon",
+                                            "Cucumis_sativus",
+                                            "Soil_Fast",
+                                            "Soil_Medium",
+                                            "Soil_Slow",
+                                            "Soil_pre_planting"))
+                                           
+
+
+# set Sp_ab_name as factor, and then order it according phylogeny
+
+sample_data(unfiltered_unnormalized_bac_ps)$Sp_abb_name<- factor(sample_data(unfiltered_unnormalized_bac_ps)$Sp_abb_name, 
+                                 levels = c("At",
+                                            "Al",
+                                            "Cas",
+                                            "Tg",
+                                            "Ec",
+                                            "Mm",
+                                            "Bv",
+                                            "Lr",
+                                            "Ds",
+                                            "Bn",
+                                            "Sar",
+                                            "Sal",
+                                            "Hi",
+                                            "Br",
+                                            "Bo_F",
+                                            "Bo_M",
+                                            "Bo_S",
+                                            "BoK",
+                                            "Dt",
+                                            "Si",
+                                            "It",
+                                            "Co",
+                                            "Lm",
+                                            "Ia",
+                                            "Bi",
+                                            "Es",
+                                            "Sl",
+                                            "Nb",
+                                            "Ps",
+                                            "Mt",
+                                            "Zm",
+                                            "Bd",
+                                            "Cus",
+                                            "S_F",
+                                            "S_M",
+                                            "S_S",
+                                            "S_pre"))
+                                       
+#let's save these unnormalized objects as RData so they can be loaded in other scripts
+save(unfiltered_unnormalized_bac_ps, file = "./data/phyloseq_objects/unfiltered_unnormalized_bac_ps.RData")
+ 
+```
+
+
+##1.3.2. Decontaminate ITS
+```{r}
+
+#decontaminate!
+#we the following function we remove contaminants and after we also remove blank samples
+unfiltered_unnormalized_bac_l<-decontaminate_and_plot(raw_bac_ps)
+unfiltered_unnormalized_fun_l<-decontaminate_and_plot(raw_fun_ps)
+
+
+# let's look into how many reads our blank had (average+sd) so we can compare those to libraries with very low number of reads
+blank_reads_bac<-sort(sample_sums(subset_samples(raw_bac_ps, Stress == "Blank")))
+plot(blank_reads_bac)
+
+
+blank_reads_fun<-sort(sample_sums(subset_samples(raw_fun_ps, Stress == "Blank")))
+plot(blank_reads_fun)
+
+
+
+
+
+#clean up enviroment to free memory
+#rm(raw_bac_ps, raw_fun_ps)
+
+# after checking the decontamination plots and reports, we can remove them and focus on the phyloseq oject
+unnormalized_bac_ps<-unlist(unnormalized_bac_ps[[1]])
+
+unfiltered_unnormalized_fun_ps<-unlist(unfiltered_unnormalized_fun_l[[1]])
+
+
+# add library sizes as part of metadata
+sample_data(unfiltered_unnormalized_fun_ps)$library_size_decont<-sample_sums(unfiltered_unnormalized_fun_ps)
+
+
+# now let's save them as list, add names to this list, and remove unlisted ps objects to release memory
+#unnormalized_BacFun_ps_l<-list(unnormalized_bac_ps,unnormalized_fun_ps)
+#names(unnormalized_BacFun_ps_l)<-c("Bac","Fun")
+#rm(unnormalized_bac_ps,unnormalized_fun_ps)
+
+
+# now let's check the lower end of our library sizes
+sort(sample_sums(unnormalized_BacFun_ps_l$Bac))
+plot(sort(sample_sums(unnormalized_BacFun_ps_l$Bac)))
+# 5 samples from 440-1362 reads, and 16S blank averages + 3xSD = 3752 reads. the next sample has 6200 reads. let's remove this 5 samples even from CSS and unnormalized as they essentially failed amplification
+
+sort(sample_sums(unfiltered_unnormalized_fun_ps))
+plot(sort(sample_sums(unfiltered_unnormalized_fun_ps)))
+summary(sample_sums(unfiltered_unnormalized_fun_ps))
+# 52 samples were from 504-3227 reads, we remove them (all below 5000)
+# 1 sample is above 230.000, we also remove it
+
+unfiltered_unnormalized_fun_ps <- subset_samples(unfiltered_unnormalized_fun_ps, library_size_decont>5000)
+
+unfiltered_unnormalized_fun_ps <- subset_samples(unfiltered_unnormalized_fun_ps, library_size_decont<230000)
+
+plot(sort(sample_sums(unfiltered_unnormalized_fun_ps)))
+summary(sample_sums(unfiltered_unnormalized_fun_ps))
+
+#remove those ASVs with now 0 reads 
+prune_taxa(taxa_sums(unfiltered_unnormalized_fun_ps) >0, unfiltered_unnormalized_fun_ps)
+
+#and ITS blank averages + 3xSD = 1598 reads, so we will remove them. there are other 4 samples between 1678 and 2151 reads before a jump to 5751 reads, so we will also remove them (they would likely be outliers in any test)
+
+sample_data(unfiltered_unnormalized_fun_ps)
+
+
+
+
+# set sp_speed as factor, and then order it properly
+#unnormalized_BacFun_ps_l<- lapply(unnormalized_BacFun_ps_l, function (x){
+#sample_data(x)$Sp_speed<- factor(sample_data(x)$Sp_speed, 
+ #                                levels = c("F1","F2","F3","F4","F5","F6","F7","F8","F9","F10","F11","F12",
+                                            #"M1","M2","M3","M4","M5","M6","M7","M8","M9","M10","M11","M12",
+                                            #"S1","S2","S3","S4","S5","S6","S7","S8","S9","S10","S11","S12",
+ #                                           "pre_planting"))
+  #                                          return(x)
+   #                                                                     })
+
+# set sp_speed as factor, and then order it properly
+
+sample_data(unfiltered_unnormalized_fun_ps)$Sp_speed <- factor(sample_data(unfiltered_unnormalized_fun_ps)$Sp_speed, 
+                                 levels = c("F1","F2","F3","F4","F5","F6","F7","F8","F9","F10","F11","F12",
+                                            "M1","M2","M3","M4","M5","M6","M7","M8","M9","M10","M11","M12",
+                                            "S1","S2","S3","S4","S5","S6","S7","S8","S9","S10","S11","S12",
+                                            "pre_planting"))
+
+# set Sp_full_name as factor, and then order it according phylogeny
+
+sample_data(unfiltered_unnormalized_fun_ps)$Sp_full_name<- factor(sample_data(unfiltered_unnormalized_fun_ps)$Sp_full_name, 
+                                 levels = c("Arabidopsis_thaliana",
+                                            "Arabidopsis_lyrata",
+                                            "Camelina_sativa",
+                                            "Turritis_glabra",
+                                            "Erysium_cheirantoides",
+                                            "Malcomia_maritima",
+                                            "Barbarea_vulgaris",
+                                            "Lepidium_ruderale",
+                                            "Descurainia_sophiades",
+                                            "Brassica_nigra",
+                                            "Sinapis_arvensis",
+                                            "Sinapis_alba",
+                                            "Hirschfeldia_incana",
+                                            "Brassica_rapa",
+                                            "Brassica_oleraceae_Rivera_Fast",
+                                            "Brassica_oleraceae_Rivera_Medium",
+                                            "Brassica_oleraceae_Rivera_Slow",
+                                            "Brassica_oleraceae_Kimmeridge",
+                                            "Diplotaxis_tenuifolia",
+                                            "Sysimbrium_irio",
+                                            "Isatis_tinctoria",
+                                            "Cochlearia_officinalis",
+                                            "Lobularia_maritima",
+                                            "Iberis_amara",
+                                            "Berteroa_incana",
+                                            "Euclydium_syriacum",
+                                            "Solanum_lycopersicum",
+                                            "Nicotiana_benthamiana",
+                                            "Pisum_sativum",
+                                            "Medicago_truncatula",
+                                            "Zea_mays",
+                                            "Brachypodium_distachyon",
+                                            "Cucumis_sativus",
+                                            "Soil_Fast",
+                                            "Soil_Medium",
+                                            "Soil_Slow",
+                                            "Soil_pre_planting"))
+                                           
+
+
+# set Sp_ab_name as factor, and then order it according phylogeny
+
+sample_data(unfiltered_unnormalized_fun_ps)$Sp_abb_name<- factor(sample_data(unfiltered_unnormalized_fun_ps)$Sp_abb_name, 
+                                 levels = c("At",
+                                            "Al",
+                                            "Cas",
+                                            "Tg",
+                                            "Ec",
+                                            "Mm",
+                                            "Bv",
+                                            "Lr",
+                                            "Ds",
+                                            "Bn",
+                                            "Sar",
+                                            "Sal",
+                                            "Hi",
+                                            "Br",
+                                            "Bo_F",
+                                            "Bo_M",
+                                            "Bo_S",
+                                            "BoK",
+                                            "Dt",
+                                            "Si",
+                                            "It",
+                                            "Co",
+                                            "Lm",
+                                            "Ia",
+                                            "Bi",
+                                            "Es",
+                                            "Sl",
+                                            "Nb",
+                                            "Ps",
+                                            "Mt",
+                                            "Zm",
+                                            "Bd",
+                                            "Cus",
+                                            "S_F",
+                                            "S_M",
+                                            "S_S",
+                                            "S_pre"))
+                                       
+#let's save these unnormalized objects as RData so they can be loaded in other scripts
+save(unfiltered_unnormalized_fun_ps, file = "./data/phyloseq_objects/unfiltered_unnormalized_fun_ps.RData")
+
+load("./data/phyloseq_objects/unfiltered_unnormalized_fun_ps.RData")
+
+
+
+
+```
+
+
+
+
+
+
+# 1.4-  Plot library sizes per treatment
+
+```{r}
+
+# let's check the number of reads in a couple histograms
+hist(sample_sums(unfiltered_unnormalized_bac_ps), breaks = 200)
+summary(sample_sums(unfiltered_unnormalized_bac_ps))
+
+hist(sample_sums(unfiltered_unnormalized_fun_ps), breaks = 200)
+summary(sample_sums(unfiltered_unnormalized_fun_ps))
+
+
+#check plot for some minimum library sizes on rhizoplane samples
+
+  
+ggplot(data = sample_data(subset_samples(unfiltered_unnormalized_bac_ps, sample_type=="rhizoplane")), mapping = aes(x=library_size, y=Sp_abb_name, color = Stress, fill = Stress))+
+    geom_jitter()+
+    geom_boxplot()+
+    scale_y_discrete(limits=rev)+
+    geom_hline(yintercept=30000, color="green")+
+    geom_hline(yintercept=25000, color="yellow")+
+    geom_hline(yintercept=20000, color="blue")+
+    geom_hline(yintercept=15000, color="red")+
+    labs(x = "Library size",
+         y = "Plant species and speed")+
+theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1))
+
+ggplot(data = sample_data(subset_samples(unfiltered_unnormalized_fun_ps, sample_type=="rhizoplane")), mapping = aes(x=library_size, y=Sp_abb_name, color = Stress, fill = Stress))+
+    geom_jitter()+
+    geom_boxplot()+
+    scale_y_discrete(limits=rev)+
+    geom_hline(yintercept=30000, color="green")+
+    geom_hline(yintercept=25000, color="yellow")+
+    geom_hline(yintercept=20000, color="blue")+
+    geom_hline(yintercept=15000, color="red")+
+    labs(x = "Library size",
+         y = "Plant species and speed")+
+theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1))
+
+
+#check plot for some minimum library sizes on top soil samples
+
+  ggplot(data = sample_data(subset_samples(unfiltered_unnormalized_bac_ps, sample_type!="rhizoplane")), mapping = aes(x=Sp_speed, y=library_size, color = Stress, fill = Stress))+
+    geom_jitter()+
+    geom_boxplot()+
+    geom_hline(yintercept=30000, color="green")+
+    geom_hline(yintercept=25000, color="yellow")+
+    geom_hline(yintercept=20000, color="blue")+
+    geom_hline(yintercept=15000, color="red")+
+theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1))
+
+  ggplot(data = sample_data(subset_samples(unfiltered_unnormalized_fun_ps, sample_type!="rhizoplane")), mapping = aes(x=Sp_speed, y=library_size, color = Stress, fill = Stress))+
+    geom_jitter()+
+    geom_boxplot()+
+    geom_hline(yintercept=30000, color="green")+
+    geom_hline(yintercept=25000, color="yellow")+
+    geom_hline(yintercept=20000, color="blue")+
+    geom_hline(yintercept=15000, color="red")+
+theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1))  
+
+#check bacterial 16S plant host contamination
+
+ggplot(data = sample_data(subset_samples(unfiltered_unnormalized_bac_ps, sample_type=="rhizoplane")), mapping = aes(x=Host_DNA_contamination_pct, y=Sp_abb_name, color = Stress, fill = Stress))+
+    geom_jitter()+
+    geom_boxplot()+
+    scale_y_discrete(limits=rev)+
+    geom_hline(yintercept=30000, color="green")+
+    geom_hline(yintercept=25000, color="yellow")+
+    geom_hline(yintercept=20000, color="blue")+
+    geom_hline(yintercept=15000, color="red")+
+    labs(x = "Plant host DNA contamination",
+         y = "Plant species")+
+    theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1))
+
+ggplot(data = sample_data(subset_samples(unfiltered_unnormalized_fun_ps, sample_type=="rhizoplane")), mapping = aes(x=Host_DNA_contamination_pct, y=Sp_abb_name, color = Stress, fill = Stress))+
+    geom_jitter()+
+    geom_boxplot()+
+    scale_y_discrete(limits=rev)+
+    geom_hline(yintercept=30000, color="green")+
+    geom_hline(yintercept=25000, color="yellow")+
+    geom_hline(yintercept=20000, color="blue")+
+    geom_hline(yintercept=15000, color="red")+
+    labs(x = "Plant host DNA contamination",
+         y = "Plant species")+
+    theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1))
+
+
+
+#check percentage of NA in taxonomy
+lapply(unnormalized_BacFun_ps_l, function (x) check_n_taxa_NA_percentage(x, 100))
+lapply(unnormalized_BacFun_ps_l, function (x) check_n_taxa_NA_percentage(x, 1000))
+lapply(unnormalized_BacFun_ps_l, function (x) check_n_taxa_NA_percentage(x, 10000))
+
+lapply(unnormalized_BacFun_ps_l, function (x) subset_taxa(x, Class == "c__uncultured" | Class == "c__unidentified"))
+lapply(unnormalized_BacFun_ps_l, function (x) subset_taxa(x, Family == "f__uncultured" | Family == "f__unidentified"))
+lapply(unnormalized_BacFun_ps_l, function (x) subset_taxa(x, Genus == "g__uncultured" | Genus == "g__unidentified"))
+
+
+check_n_taxa_NA_percentage(unfiltered_unnormalized_bac_ps, 100) #23
+check_n_taxa_NA_percentage(unfiltered_unnormalized_bac_ps, 1000) #13.3
+check_n_taxa_NA_percentage(unfiltered_unnormalized_bac_ps, 10000) #9.42
+
+subset_taxa(unfiltered_unnormalized_bac_ps, Class == "c__uncultured" | Class == "c__unidentified") #1872
+subset_taxa(unfiltered_unnormalized_bac_ps, Family == "f__uncultured" | Family == "f__unidentified") #2930
+subset_taxa(unfiltered_unnormalized_bac_ps, Genus == "g__uncultured" | Genus == "g__unidentified") #69074
+
+
+check_n_taxa_NA_percentage(unfiltered_unnormalized_fun_ps, 100) #15
+check_n_taxa_NA_percentage(unfiltered_unnormalized_fun_ps, 1000) #22
+check_n_taxa_NA_percentage(unfiltered_unnormalized_fun_ps, 10000) #21.77
+
+subset_taxa(unfiltered_unnormalized_fun_ps, Class == "c__uncultured" | Class == "c__unidentified") #286
+subset_taxa(unfiltered_unnormalized_fun_ps, Family == "f__uncultured" | Family == "f__unidentified") #754
+subset_taxa(unfiltered_unnormalized_fun_ps, Genus == "g__uncultured" | Genus == "g__unidentified") #1161
+
+```
+
+
+
+# 1.5 export filtered unnormalized ps object
+```{r}
+
+#let's prepare 2 different  versions: one without only with rhizoplane and other only with top/bulksoils 
+
+
+
+unfiltered_unnormalized_bac_rhizo_ps <- subset_samples(unfiltered_unnormalized_bac_ps, 
+                  sample_type == "rhizoplane" & 
+                  Stress != "Soil" )
+
+unfiltered_unnormalized_fun_rhizo_ps <- subset_samples(unfiltered_unnormalized_fun_ps, 
+                  sample_type == "rhizoplane" & 
+                  Stress != "Soil" )
+
+unfiltered_unnormalized_bulksoil_bac_ps <- subset_samples(unfiltered_unnormalized_bac_ps, 
+                  sample_type != "rhizoplane" & 
+                  Stress == "Soil" )
+
+unfiltered_unnormalized_bulksoil_fun_ps <- subset_samples(unfiltered_unnormalized_fun_ps, 
+                  sample_type != "rhizoplane" & 
+                  Stress == "Soil" )
+
+
+
+# remove non-informative rows
+
+unfiltered_unnormalized_bac_rhizo_ps <- prune_taxa(taxa_sums(otu_table(unfiltered_unnormalized_bac_rhizo_ps)) > 0, unfiltered_unnormalized_bac_rhizo_ps)
+
+unfiltered_unnormalized_bulksoil_bac_ps <- prune_taxa(taxa_sums(otu_table(unfiltered_unnormalized_bulksoil_bac_ps)) > 0, unfiltered_unnormalized_bulksoil_bac_ps)
+
+unfiltered_unnormalized_fun_rhizo_ps <- prune_taxa(taxa_sums(otu_table(unfiltered_unnormalized_fun_rhizo_ps)) > 0, unfiltered_unnormalized_fun_rhizo_ps)
+
+unfiltered_unnormalized_bulksoil_fun_ps <- prune_taxa(taxa_sums(otu_table(unfiltered_unnormalized_bulksoil_fun_ps)) > 0, unfiltered_unnormalized_bulksoil_fun_ps)
+  
+
+
+# now we save the different versions
+save(unfiltered_unnormalized_bac_rhizo_ps, 
+     file = "./data/phyloseq_objects/unfiltered_unnormalized_bac_rhizo_ps.RData")
+save(unfiltered_unnormalized_bulksoil_bac_ps, 
+     file = "./data/phyloseq_objects/unfiltered_unnormalized_bulksoil_bac_ps.RData")
+save(unfiltered_unnormalized_fun_rhizo_ps, 
+     file = "./data/phyloseq_objects/unfiltered_unnormalized_fun_rhizo_ps.RData")
+save(unfiltered_unnormalized_bulksoil_fun_ps, 
+     file = "./data/phyloseq_objects/unfiltered_unnormalized_bulksoil_fun_ps.RData")
+
+
+
+
+
+```
+

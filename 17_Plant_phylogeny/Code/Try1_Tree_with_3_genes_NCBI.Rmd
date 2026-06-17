@@ -1,0 +1,350 @@
+---
+title: "Phylogenetic analysis"
+author: "Marcela Aragon"
+date: "2/09/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Overview
+
+The aim was to reconstruct a phylogeny of the Brassicacea family with 24 species by using either (1) only the '"ITS1/5.8/ITS2"' nuclear region, hereafter refered to as **ITS**, or by (2) adding 2 chloroplast genes '"rbcL"' and '"matK"' to the ITS sequence to have 3 genes in total, hereafter referred to as **concatenated**.
+
+
+
+For this, the following steps were done:
+
+1. Searching and downloading accessions of the 3 genes from all plant species from GeneBank
+2. Aligning sequences 
+  + Checking for direction of transcript in [MAFFT](https://mafft.cbrc.jp/alignment/server/)
+  + MSA in [GUIDANCE2](http://guidance.tau.ac.il/)
+  + Removing columns with low support 
+  + Manually clipping aligned sequences for same length
+  + Concatenate 3 sequences for concatenated set
+3. Finding best nucleotide substitution model in [ModelFinder](http://iqtree.cibiv.univie.ac.at/) for each gene
+4. Building Bayesian phylogenetic tree in [Mr.Bayes](https://nbisweden.github.io/MrBayes/)
+5. Visualizing tree in [iTOL](https://itol.embl.de/)
+6. Calculating phylogenetic pairwise distances 
+
+
+
+The main papers used as reference to reconstruct the phylogeny were [Fitzpatrick *et al.* 2018.PNAS](https://www.pnas.org/content/115/6/E1157) and [Mertens *et al.* 2021.Ecology Letters](https://onlinelibrary.wiley.com/doi/full/10.1111/ele.13852). 
+
+Reference textbook used was Hall,B.2016.Phylogenetic Trees made easy.XXXX
+
+## 1. Searching and downloading gene accessions
+
+An extended search was done in GeneBank to get the FASTA sequences of the 3 genes. The criteria for choosing the accessions was that were the reference ones in [BrassiBase](https://brassibase.cos.uni-heidelberg.de/) for the ITS sequences, and for ''matK'' and rbcL that (1) were published or (2) found in the [BOLD Systems](https://www.boldsystems.org/) Barcode database. Sequences were retrieved from the chloroplast genome in case there were no available individual sequences.
+
+
+<font size="0.5">**Table 1. Gene accession numbers from GeneBank, guest species are also included**</font> 
+
+
+| Species                         | Code | ITS_GeneBank | rbcl_GeneBank      | matk_GeneBank      |
+|---------------------------------|------|--------------|--------------------|--------------------|
+| Arabis glabra                   | M7   | GQ303494.1   | MG247209.1         | MK926052.1         |
+| Berteroa incana                 | F10  | AJ232900.1   | JN891749.1         | JN894751.1         |
+| Cochlearia officinalis          | S7   | DQ249853.1   | MK925510.1         | MK925660.1         |
+| Iberis amara                    | S6   | AJ232915.1   | JN891539.1         | JN894594.1         |
+| Lobularia maritima              | F9   | EF514632.1   | KX678696.1         | KX677289.1         |
+| Arabidopsis lyrata              | M4   | DQ003644.1   | JN893428.1         | JN895965.1         |
+| Arabidopsis thaliana            | F4   | KT625477.1   | JN891540.1         | JN894595.1         |
+| Barbarea vulgaris               | F6   | DQ003652.1   | GQ184375.1         | KX783642.1         |
+| Camelina sativa                 | M6   | GQ268060.1   | MG191382.1         | MG191365.1         |
+| Descurainia sophiades           | M5   | FN599860.1   | MG249045.1         | MK925875.1         |
+| Erysimum cheirantoides          | F5   | HQ268642.1   | JN893155.1         | JN895761.1         |
+| Lepidium ruderale               | F8   | HQ896616.1   | KC482526.1         | KC474537.1         |
+| Malcolmia maritima              | F7   | MW605071.1   | JN894958.1         | HE967405.1         |
+| Brassica nigra                  | M8   | DQ005989.1   | MN204794.1         | MN273630.1         |
+| Brassica oleraceae_wild         | S9   | DQ357544.1   | KY912024.1         | KY912024.1         |
+| Brassica oleraceae_var_capitata | S1   | AY722470.1   | KF997351.1         | JN584990.1         |
+| Brassica rapa                   | M9   | AJ440311.1   | MK924626.1         | MK926054.1         |
+| Diplotaxis tenuifolia           | S11  | AF384104.1   | MK925332.1         | MK926058.1         |
+| Hirschfeldia incana             | S5   | JF976776.1   | JF942219.1         | JF954308.1         |
+| Isatis tinctoria                | S8   | EF514681.1   | KM892720.1         | KM892729.1         |
+| Sinapis alba                    | M10  | AM905723.1   | NC_049671.1        | NC_049671.1        |
+| Sinapis arvensis                | S10  | AF128106.1   | JN893672.1         | JN896230.1         |
+| Sysimbrium irio                 | M11  | DQ249828.1   | JN893801.1         | JN896227.1         |
+| Euclidium syriacum              | F11  | AF531558.1   | MW174821.1         | MW188520.1         |
+| Aethionema arabicum             | NA   | EF093522.1   | EF208123.1         | JN000307.1         |
+| Brachypodium distachyon         | M3   | JQ858260.1   | NC_003119.8        | NC_003119.8        |
+| Cucumis sativus                 | S4   | DQ311988.1   | MG248509.1         | AB935092.1         |
+| Medicago truncatula             | M2   | AF303399.1   | NC_011032.1        | NC_011032.1        |
+| Nicotiana benthamiana           | S3   | KU182535.1   | NC_001666.2        | NC_001666.2        |
+| Pisum sativum                   | F2   | AJ492409.1   | Z00044.2           | AB040014.1         |
+| Solanum lycopersicum            | S2   | DQ314157.1   | HQ590280.1         | HQ593449.1         |
+| Zea mays                        | F3   | AY254539.1   | Chloroplast Genome | Chloroplast Genome |
+
+## 2.Aligning the sequences 
+
+### Checking for direction
+
+Multiple sequence alignment (MSA) was done in several steps. First, direction of FASTA sequences were checked by MAFFT. For *matK* of *Lobularia maritima* the sequence was the reverse one (blue line of plots in MAFFT), so the [Reverse complement](https://www.bioinformatics.org/sms/rev_comp.html) was used instead.
+
+
+
+
+### MSA and removal of unreliable columns 
+
+Once checked, the MSA was done in GUIDANCE2 using the MAFFT algorithm and 100 bootstrap repeats. The MSA results can be found in the following links (only available for 1 month (~06/03/2022):
+
+
+* Link to GUIDANCE2 / Guidance alignment score/ Unreliable columns removed
+* [ITS](http://guidance.tau.ac.il/results/16439151601302/output.php), 0.9531, below 0.74 treshold
+* [matK](http://guidance.tau.ac.il/results/16439769366234/output.php), 0.9999, not removed
+* [rbcL](http://guidance.tau.ac.il/results/16439152125951/output.php), 0.9996, not removed 
+
+
+MSA were downloaded from GUIDANCE2 as .txt files 
+
+* <span style="color: red;"> **Question 1: I couldn't use the alignment directly from MAFFT because the MSA output was not accepted in GUIDANCE2, I got some error messages, so I did the alignment in GUIDANCE2 using the MAFFT algorithm but with no more extra settings, is this okay?**</span>
+
+**--> Maybe putting AUTO in MAFFT is better and GUIDANCE2 can check it without error**
+**--> Check 2 alignments together and 
+
+
+
+### Manually clipping MSA
+
+The MSA (.txt files) were then uploaded to MEGA X for visualization and saved as FASTA (.fas) files. The alignment was visualized in MEGA and 'excess' sequences were trimmed (clipped) as recommended by Klaas Bouwmeester. For this, sequences were clipped in the first and last column in which sequence information was available for all the species. Resulting in;
+
+
+*ITS: 563 bp
+*matK: 604 bp
+*rbcL: 495 bp
+
+
+### Concatenating sequences 
+
+Names for all species were checked and adjusted to be the same among the 3 sequences to concatenate them by name. For this, clipped sequences were open in SeaView and put together with the option 'File --> concatenate' resulting in 1 final sequence of 1164 bp. Order of the genes was registered to be used as input for the partition analysis in Mr. Bayes. 
+
+1-563(ITS)+564-1168(matK)+1169-1664(rbcL)
+
+
+## 3.Finding best-fitting nucleotide substitution model
+
+
+The best nucleotide substitution model was obtained in [ModelFinder](http://iqtree.cibiv.univie.ac.at/) for each of the 3 genes. For this, the clipped MSA was uploaded in the 'Model selection' tab of the IQ-TREE web server and a Bayesian Information Criterion (BIC) was used for selection of the best fitting model. Due that Mr. Bayes does not support all nucleotide substitution models available in ModelFinder, the search for candidate models was constrained to those available in Mr. Bayes (JC, SYM, HKY, K2P, F81 and GTR). 
+
+|                                                    |     ITS1/5.8/ITS2    |         matK       |         rbcL       |     concatenated    |
+|:--------------------------------------------------:|:--------------------:|:------------------:|:------------------:|:-------------------:|
+|                                              bp    |          563         |         605        |         496        |         1664        |
+|                                        constant    |      313 (55.5%)     |     429 (70.9%)    |     450 (90.7%)    |     1192 (71.6%)    |
+|                           Parsimony informative    |          167         |          64        |          23        |          254        |
+|                          Distinct site patterns    |          262         |         164        |          49        |          435        |
+|                            Best-fit model (BIC)    |         SYM+G4       |      TPM3+F+G4     |        K3P+I       |      GTR+F+I+G4     |
+|     Best-fit model (BIC) –selection Mr.   Bayes    |         SYM+G4       |       GTR+F+G4     |        K2P+I       |      GTR+F+I+G4     |
+
+
+<font size="0.5">
+Notes: JC: Jukes-Cantor model
+SYM: Symmetrical model, equal base frequencies, symmetrical substitution matrix
+TVM: Transversion model, variable base frequencies, variable transversion rates, transition rates equal
+K3Pu: Kimura 3-parameter model, variable base frequencies, equal transition rates, two transversion rates
+GTR: General time-reversible model, variable base frequencies, symmetrical substitution matrix
+</font> 
+
+## 4.Building Bayesian phylogenetic tree
+
+A bayesian phylogenetic tree was reconstructed in [Mr.Bayes v3.2.6](https://nbisweden.github.io/MrBayes/) using both (1) only ITS and (2) the concatenated sequence of the 3 genes. The best-fit model (SYM+G4) was used for ITS, and for the concatenated sequence the model and priors were adjusted to each of the genes in a partitioned analysis (Chapter 3 of Mr. Bayes manual). Settings used were as follow;
+
+|               |                                                    |         ITS1/5.8/ITS2        |                              matK                             |         rbcL        |
+|:-------------:|:--------------------------------------------------:|:----------------------------:|:-------------------------------------------------------------:|:-------------------:|
+|               |     Best-fit model (BIC) –selection Mr.   Bayes    |             SYM+G4           |                            GTR+F+G4                           |         K2P+I       |
+|      Model    |                         Nst                        |               6              |                                6                              |           2         |
+|               |                        rates                       |             gamma            |                              gamma                            |        propinv      |
+|     Priors    |                     statefreqpr                    |          fixed(equal)        |     Empirical      (A:0.321, C:0.1411, G:0.1553, T:0.3827)    |     fixed(equal)    |
+|               |                       brlenspr                     |     Unconstrained:Exp(10)    |                                                               |                     |
+
+The Markov Chain Montecarlo simulation (MCMC) was set to 100,000 generations `mcmcp ngen=100000` with a `diagnfreq=1000` and a `samplefreq=100`. The simulation ran for an additional 200,000 generations until the average standard deviation of split frequencies between the two chains was <0.01 (300,000 generations in total). 
+
+The first XX trees were discarded as burnin `sumt relburnin=yes burninfraq=0.25` and the `.con.tre` file was used as the consensus tree with posterior probabilities. 
+
+
+* <span style="color: red;"> **Question 2: Is this approach of partitioned analysis okay?**</span>
+* <span style="color: red;"> **Question 3: am I using the right file for the consensus tree? or do I need to somehow obtain it by calculating something else from the other output files** ('i.e.' .trprobs or .mcmc files)?</span>
+* <span style="color: red;"> **Question 4: I tried both using Aethionema as outgroup and without it, but at the end I didn't put it as outgroup in the final analysis as later on I obtained a strange pairwise distance matrix (with NAs in the line of Aethionema), shall I change this and put it as an outgroup instead?**</span>
+* <span style="color: red;"> **Question 5: For now I've only done Bayesian inference of the tree, I see that in Daan's paper Maximum-likelihood analysis were also done with W-IQ-TREE, why was this? you try both methods of inference and then see which one makes more sense or the information from the ML is used afterwards in another analysis? **</span>
+
+
+## 5.Visualizing the phylogenetic tree 
+
+
+Both consensus phylogenetic trees were drawn and edited in [iTOL](https://itol.embl.de/). The tentative lineage of the species obtained from BrassiBase was added as metadata. 
+
+Branch lengths are displayed above the lines in black and (posterior?) probabilities are shown below the lines in blue.
+
+
+
+![**Phylogenetic consensus tree reconstructed with ITS sequences**](images/ITS_con.tre.png)
+
+
+
+
+
+![**Phylogenetic consensus tree reconstructed with concatenated ITS, matK and rbcL sequences**](images/Concatenated.con.tre.png)
+
+
+Observations:
+
+
+* In both cases the clade of lineage II seems to be clustered as expected (BrassiBase)
+* However lineage I and Exp. lineage II are different according to the type of gene(s) used; Lineage I seems to be monophiletic when using the concatenated sequences and I'm not sure how to interpret it when using only ITS.
+* Also not sure how to interpret the expanded lineage II species in the concatenated tree, they have each its own line as if they were not part of the same group/clade (?)
+* In both cases 'Berteroa incana' is positioned outside of both groups (perhaps sequences are not great?) 
+* Looking at the tree scale bar it looks as if the distances in the ITS tree are larger than when using the concatenated sequences.
+
+* <span style="color: red;"> **Question 6: Is it better to 'constrain' the tree in Mr. Bayes in order to group species in their lineages/clades? I see they do this in the Fitzpatrick paper, perhaps we could use the genome phylogeny of Klaas as reference or some other Brassicaceae reference phylogeny?**</span>
+* <span style="color: red;"> **Question 7: Is this a correct approach, or is it better to just 'prune' an existing reference tree to keep the species we are interested in?**</span>
+
+
+## 6.Calculating phylogenetic pairwise distances
+
+Phylogenetic pairwise distances were calculated in R. The idea was to obtain a phylogenetic dissimilarity matrix based on the DNA sequences amongst plant species to correlate it (later) with B-diversity dissimilarity matrices in a Mantel test. 
+
+The book ['Analysis of Phylogenetics and Evolution in R'](https://link.springer.com/book/10.1007/978-1-4614-1743-9) of Emmanuel Paradis was used as reference. 
+
+First, libraries are loaded `ape`, `heatmaply`, `ade4`
+```{r message=FALSE, include=FALSE, results='hide'}
+library("ape") #handles phylogenetic objects
+library("phangorn") #UPGMA & NJ
+library("heatmaply") #visualization of distance matrix
+library("ade4")
+library("cowplot")
+```
+
+The dna sequences are read from the fasta file and imported as a DNAbind matrix
+
+```{r, echo=TRUE}
+dna.alignment <- read.dna("ITS_aligned_clipped.fas", format="fasta", as.matrix=TRUE) #this returns a matrix of class DNAbind
+class(dna.alignment) #checking class
+```
+Then, the pairwise distances are calculated with the `dist.dna` function and different [evolutionary models](https://www.rdocumentation.org/packages/ape/versions/5.6-1/topics/dist.dna)
+```{r, echo=TRUE}
+distance.raw<- dist.dna(dna.alignment, model="raw", variance = FALSE, #raw distance based on number of bp
+                        gamma = FALSE, pairwise.deletion = FALSE, 
+                        base.freq = NULL, as.matrix = FALSE)
+
+distance.jc69 <- dist.dna(dna.alignment, model="JC69", variance = FALSE, #distance with Jukes-Cantor model assuming all substitutions have the same probability
+                          gamma = FALSE, pairwise.deletion = FALSE, 
+                          base.freq = NULL, as.matrix = FALSE)
+
+distance.k80 <- dist.dna(dna.alignment, model="K80", variance = FALSE, #Kimura's 2-parameters distance, transitions and transversions are considered
+                         gamma = FALSE, pairwise.deletion = FALSE, 
+                         base.freq = NULL, as.matrix = FALSE)
+
+distance.tn93 <- dist.dna(dna.alignment, model="TN93", variance = FALSE, #Tamura and Nei distance, calculates different rates for transitions and transversions
+                          gamma = FALSE, pairwise.deletion = FALSE, 
+                          base.freq = NULL, as.matrix = FALSE)
+```
+
+Plotting the distances in a histogram is recommended as a way to see how they are distributed, in order to plot the class of the object has to be `dist` and not `matrix` which is why `as.matrix=FALSE` in the code above
+
+```{r, echo=TRUE}
+# If as.matrix is FALSE, then class will be dist and can be plotted in an histogram for graphical exploration (p.130)
+
+#visualizing frequencies of distances, good to see distances above 0.05 
+par(mfrow = c(2,2))
+h.raw <- hist(distance.raw, 50)
+h.jc69 <- hist(distance.jc69, 50)
+h.k80 <- hist(distance.k80, 50)
+h.tn93 <- hist(distance.tn93, 50)
+```
+
+Now the class is changed to `matrix` in order to plot it in a heatmap for visualization and to save the matrix for further use in the mantel test (?)
+
+```{r echo=TRUE, fig.height=7, fig.width=10, message=FALSE, warning=FALSE}
+#Change dist objects to matrix to save files
+distance.raw.matrix <- as.matrix(distance.raw)
+distance.jc69.matrix <- as.matrix(distance.jc69)
+distance.k80.matrix <- as.matrix(distance.k80)
+distance.tn93.matrix <- as.matrix(distance.tn93)
+
+# Saving distance matrix as .Rdata (distances are not euclidean!--> but can be converted later)
+save(distance.raw.matrix, file="ITS_distmatrix_raw.Rdata")
+save(distance.jc69.matrix, file="ITS_distmatrix_JC.Rdata")
+save(distance.k80.matrix, file="ITS_distmatrix_k80.Rdata")
+save(distance.tn93.matrix, file="ITS_distmatrix_TN.Rdata")
+
+#Heatmap Example of Kimura that seems to have more distance (legend up to 0.25)
+heatmaply(distance.k80.matrix, main ="Kimura-2") 
+```
+
+
+
+
+To check for later: distance matrix are not Euclidean, which means that for now they cannot be used directly for the Mantel test, a solution given in the book is to transform it with square root
+
+```{r, echo=TRUE}
+
+## check later!
+# Test to see if distance matrix is euclidean (for mantel tests and PCOa --> check later daisy{cluster})
+is.euclid(distance.raw)
+transformed <- sqrt(distance.raw) #By transforming with square root the matrix is euclidean (p.132)
+is.euclid(transformed)
+```
+
+Same steps are repeated for the **concatenated** sequence (only plots shown now)
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+dna.alignment <- read.dna("concatenated.fas", format="fasta", as.matrix=TRUE) #this returns a matrix of class DNAbind
+
+distance.raw<- dist.dna(dna.alignment, model="raw", variance = FALSE, #raw distance based on number of bp
+                        gamma = FALSE, pairwise.deletion = FALSE, 
+                        base.freq = NULL, as.matrix = FALSE)
+
+distance.jc69 <- dist.dna(dna.alignment, model="JC69", variance = FALSE, #distance with Jukes-Cantor model assuming all sustitutions have the same probability
+                          gamma = FALSE, pairwise.deletion = FALSE, 
+                          base.freq = NULL, as.matrix = FALSE)
+
+distance.k80 <- dist.dna(dna.alignment, model="K80", variance = FALSE, #Kimura's 2-parameters distance, transitions and transversions are considered
+                         gamma = FALSE, pairwise.deletion = FALSE, 
+                         base.freq = NULL, as.matrix = FALSE)
+
+distance.tn93 <- dist.dna(dna.alignment, model="TN93", variance = FALSE, #Tamura and Nei distance, calculates different rates for transitions and transversions
+                          gamma = FALSE, pairwise.deletion = FALSE, 
+                          base.freq = NULL, as.matrix = FALSE)
+
+#visualizing frequencies of distances, good to see distances above 0.05 
+par(mfrow = c(2,2))
+h.raw <- hist(distance.raw, 50)
+h.jc69 <- hist(distance.jc69, 50)
+h.k80 <- hist(distance.k80, 50)
+h.tn93 <- hist(distance.tn93, 50)
+
+#Change dist objects to matrix to save files
+distance.raw.matrix <- as.matrix(distance.raw)
+distance.jc69.matrix <- as.matrix(distance.jc69)
+distance.k80.matrix <- as.matrix(distance.k80)
+distance.tn93.matrix <- as.matrix(distance.tn93)
+
+# Saving distance matrix as .Rdata (distances are not euclidean!--> but can be converted later)
+save(distance.raw.matrix, file="concatenated_distmatrix_raw.Rdata")
+save(distance.jc69.matrix, file="concatenated_distmatrix_JC.Rdata")
+save(distance.k80.matrix, file="concatenated_distmatrix_k80.Rdata")
+save(distance.tn93.matrix, file="concatenated_distmatrix_TN.Rdata")
+
+```
+
+```{R, echo=FALSE, fig.height=7, fig.width=10, message=FALSE, warning=FALSE}
+heatmaply(distance.k80.matrix, main ="Kimura-2")
+
+```
+
+
+
+* <span style="color: red;"> **Question 8: Is this the way the pairwise ITS distances were calculated with Daan?**</span>
+
+
+
+'Still missing to check for later how to calculate **phylogenetic signal** in R' 
+
+
+## Next steps
+
+1. Read paper about Brassicaceae genome phylogeny
+
+2. Send email to nora.walde@wur.nl to ask her for advice (not s olate as she is leaving)
+

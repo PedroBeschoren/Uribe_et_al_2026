@@ -1,0 +1,2542 @@
+---
+title: "Figure_3_import_calculate_plot"
+author: "Pedro_Beschoren"
+date: "20/04/2023"
+output:
+  pdf_document: default
+  html_document: default
+editor_options:
+  chunk_output_type: consolehtml_document
+---
+
+
+# 14.1 - set up working environemnt
+
+
+```{r}
+# this will load all key libraries for the whole project
+source("./renv/0_load_libraries.R")
+library(plyr)
+library("umap")
+library(RColorBrewer)
+library(cowplot) 
+library(multiblock)
+library(data.table)
+library(ggExtra)
+library(multimode) # for testing multiple modes in dsitribution
+
+
+# IMPORTANT: load the custom functions necessary to run this script
+source("./14_Phylogenetic_distance/code/custom_functions_PB.R")
+
+
+library(picante)
+library(ape)
+library(adephylo)
+library(ade4)
+library(phylobase)
+library(geiger)
+library(phytools)
+library(vegan)
+library(phyloseq)
+library(dplyr)
+
+
+# increases memory limit used by R
+memory.limit(size = 350000)
+```
+
+
+
+# ------
+# --- Bacteria --- 
+# ------
+
+
+# load processed R objects, BAC
+```{r}
+
+# load output of pipeline, Bac 
+load(file ="./14_Phylogenetic_distance/r_objects/bac_alltaxa_phylosig_output_PCoA_nonsig.RData")
+
+
+
+#load hundred of permanovas calculated on the HPC (output of permanova_per_taxonomic_group)
+load(file = "./14_Phylogenetic_distance/r_objects/permanovas_spXstress_528.RData") 
+
+# load hundreds of PCoA plots
+load(file = "./14_Phylogenetic_distance/r_objects/PCoA_528_plots_axis_pct.RData") # one per tax group
+load(file = "./14_Phylogenetic_distance/r_objects/PCoA_528_3x_plots_axis_pct.RData") # one per tax group and per stress
+
+# load ps objects with overwrriten library size per taxonomic group (from 11h_library_size_on_phylosig.Rmd)
+load(file = "./14_Phylogenetic_distance/r_objects/Bac_ps_taxa_l_overwrittenLibSize_ps_l.RData") 
+
+#load output of mantel pipeline 
+load(file = "./14_Phylogenetic_distance/r_objects/bac_alltaxa_mantel_pipeline_df.RData") #df
+load(file = "./14_Phylogenetic_distance/r_objects/bac_alltaxa_mantel_pipeline_bray_correlation_plot.RData") #plots
+
+
+
+```
+
+# - 
+# Prepare a df of results from 528 Permanovas + PCoAs
+
+
+## extract p/r valeus from 528 permanovas, set base df
+```{r}
+
+
+#extract r/p values
+perm_528_df<-
+permanova_output_to_plot_input2(permanova_output_l = permanovas_spXstress_528$permanova_l)
+
+
+# put % explained variaance per PC in a df
+axis_pct_tax_group<-
+  PCoA_plot_l_to_pct_variance_df(PCoA_528_plots_axis_pct)
+
+axis_pct_tax_group_Control<-
+  PCoA_plot_l_to_pct_variance_df(PCoA_528_3x_plots_axis_pct[1:3])
+names(axis_pct_tax_group_Control)[2:3]<-paste0(names(axis_pct_tax_group_Control)[2:3], "_Control_only")
+
+axis_pct_tax_group_MeJA<-
+  PCoA_plot_l_to_pct_variance_df(PCoA_528_3x_plots_axis_pct[4:6])
+names(axis_pct_tax_group_MeJA)[2:3]<-paste0(names(axis_pct_tax_group_MeJA)[2:3], "_MeJA_only")
+
+axis_pct_tax_group_SA<-
+  PCoA_plot_l_to_pct_variance_df(PCoA_528_3x_plots_axis_pct[7:9])
+names(axis_pct_tax_group_SA)[2:3]<-paste0(names(axis_pct_tax_group_SA)[2:3], "_SA_only")
+
+#put 528 PCoAs from the 3 stresses into 1 df
+axis_pct_tax_group_per_stress<-
+  cbind(axis_pct_tax_group_Control, axis_pct_tax_group_MeJA[,2:3], axis_pct_tax_group_SA[,2:3])
+
+
+# widen the df
+perm_528_df_wide<-
+pivot_wider(data = perm_528_df,
+            names_from = factor,
+            values_from = c("pvalue", "R2"))
+
+# widen phylosig df
+df_phylosig_wide<-
+pivot_wider(data = bac_alltaxa_phylosig_output_PCoA_nonsig$df_phylosig, 
+            names_from = c("stress", "higher_lower_PC"),
+            values_from = c("trait", "value", "pvalue", "pvalue_adjust"))
+
+# remove unecessary info (phylosig test used, phylosig test adjsuted p)
+df_phylosig_wide<-
+  df_phylosig_wide[,-c(2, 21:26)]
+
+
+#join 528 permanovas to widened df-phylosig
+perm_528_phylosig_df_wide<-
+  left_join(perm_528_df_wide, df_phylosig_wide, by = c("taxonomic_group" = "column_label"))
+
+#add % explained varaince
+perm_528_phylosig_pct_df<-
+  left_join(perm_528_phylosig_df_wide, axis_pct_tax_group)
+
+perm_528_phylosig_pct_df<-
+  left_join(perm_528_phylosig_pct_df, axis_pct_tax_group_per_stress)
+
+
+
+```
+
+## Add library sizes to DF of 528 PERMANOVAS + PCoA
+these updated library sizes objects were generated in script 11h_library_size_on_phylosig.Rmd
+```{r}
+
+#add library size (all 3 stresses together; that is the PERMANOVA input) to into a df 
+libSizes<-
+  lapply(ps_taxa_l_overwrittenLibSize, function(x) sum(x@sam_data$library_size))
+
+libSizes_df<-
+  as.data.frame(do.call("rbind", libSizes))%>%rownames_to_column()
+
+names(libSizes_df)<-c("taxonomic_group", "Library_size")
+
+#join with rest of 528 permanova df
+perm_528_phylosig_pct_df<-
+  left_join(perm_528_phylosig_pct_df, libSizes_df)
+
+#add library size under each stress condition(split by taxonomic gorupto df 
+libSizes_per_stress<-
+  lapply(ps_taxa_l_overwrittenLibSize, function(x) {
+    ps_per_stress<-phyloseq_sep_variable(x, var = "Stress")
+      output<-lapply(ps_per_stress, function(z)
+       sum(z@sam_data$library_size)) 
+    return(output)
+    })
+
+libSizes_per_stress<-
+  lapply(libSizes_per_stress, function(x) 
+    unlist(x))
+
+# put library sizes epr stress into a df
+libSizes_per_stress_df<-
+  as.data.frame(do.call("rbind", libSizes_per_stress))%>%rownames_to_column()
+
+names(libSizes_per_stress_df)<-c("taxonomic_group", 
+                                  "Library_size_Control", 
+                                  "Library_size_MeJA", 
+                                  "Library_size_SA")
+
+#join with rest of 528 permanova df
+perm_528_phylosig_pct_df<-
+  left_join(perm_528_phylosig_pct_df, libSizes_per_stress_df)
+
+# add column to define taxonomic rank
+perm_528_phylosig_pct_df$taxonomic_rank<-
+  factor(
+        c(
+           gsub(x = perm_528_phylosig_pct_df$taxonomic_group, pattern = "k__.*$",replacement = "Kingdom")%>%
+           gsub(pattern = "p__.*$",replacement = "Phylum")%>%
+           gsub(pattern = "o__.*$",replacement = "Order")%>%
+           gsub(pattern = "c__.*$",replacement = "Class")%>%
+           gsub(pattern = "f__.*$",replacement = "Family")%>%
+           gsub(pattern = "g__.*$",replacement = "Genus")),
+         levels = c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus"))
+
+# define unexplained permanova variance
+perm_528_phylosig_pct_df$residual_permanova<-
+  1 - (perm_528_phylosig_pct_df$R2_Block +
+          perm_528_phylosig_pct_df$R2_Sp_full_name +
+          perm_528_phylosig_pct_df$R2_Sp_x_Stress + 
+          perm_528_phylosig_pct_df$R2_Stress)
+
+# define PCoA_1/ PCoA2 varaince aexplained ratio
+perm_528_phylosig_pct_df$var_explined_ratio<-
+  (perm_528_phylosig_pct_df$PCoA_1/perm_528_phylosig_pct_df$PCoA_2)
+
+
+
+```
+
+
+
+## define distance to centroids for the 3 experimental factors (Block, plant_sp, Stress)
+```{r}
+
+#define function to wrangle beta dispersion data
+get_beta_disper_comparison<-function(Taxonomic_group_beta_disper){
+  
+dist_to_centroid_df<-
+  as.data.frame(Taxonomic_group_beta_disper$beta_disper_block$distances)
+
+names(dist_to_centroid_df)<-"distance_to_centroid"
+dist_to_centroid_df<-rownames_to_column(dist_to_centroid_df, var = "sample_name")
+dist_to_centroid_df$centroid_group<-"Block"
+dist_to_centroid_df$group_ID<-Taxonomic_group_beta_disper$beta_disper_block$group
+
+
+dist_to_centroid_df2<-
+  as.data.frame(Taxonomic_group_beta_disper$beta_disper_sp$distances)
+
+names(dist_to_centroid_df2)<-"distance_to_centroid"
+dist_to_centroid_df2<-rownames_to_column(dist_to_centroid_df2, var = "sample_name")
+dist_to_centroid_df2$centroid_group<-"plant_Sp"
+dist_to_centroid_df2$group_ID<-Taxonomic_group_beta_disper$beta_disper_sp$group
+
+
+dist_to_centroid_df3<-
+  as.data.frame(Taxonomic_group_beta_disper$beta_disper_stress$distances)
+
+names(dist_to_centroid_df3)<-"distance_to_centroid"
+dist_to_centroid_df3<-rownames_to_column(dist_to_centroid_df3, var = "sample_name")
+dist_to_centroid_df3$centroid_group<-"Stress"
+dist_to_centroid_df3$group_ID<-Taxonomic_group_beta_disper$beta_disper_stress$group
+
+
+dist_to_centroid_df<-
+  rbind(dist_to_centroid_df,dist_to_centroid_df2,dist_to_centroid_df3)
+
+#print(ggplot(dist_to_centroid_df, aes(x = centroid_group, y = distance_to_centroid))+
+ # geom_boxplot())
+
+return(dist_to_centroid_df)
+}
+
+#execute custom function above, generating a list of dfs
+beta_disper_comparions_df_l<-lapply(permanovas_spXstress_528$beta_disper_l, function(z)
+  get_beta_disper_comparison(Taxonomic_group_beta_disper = z))
+
+#join list
+beta_disper_comparions_df<-
+  do.call("rbind", beta_disper_comparions_df_l)%>%rownames_to_column(var = "taxonomic_group")
+
+#adjsut names
+beta_disper_comparions_df$taxonomic_group<-
+  gsub(pattern = "\\..*",replacement = "", x = beta_disper_comparions_df$taxonomic_group)
+
+# add column to define taxonomic rank
+beta_disper_comparions_df$taxonomic_rank<-
+  factor(
+        c(
+           gsub(x = beta_disper_comparions_df$taxonomic_group, pattern = "k__.*$",replacement = "Kingdom")%>%
+           gsub(pattern = "p__.*$",replacement = "Phylum")%>%
+           gsub(pattern = "o__.*$",replacement = "Order")%>%
+           gsub(pattern = "c__.*$",replacement = "Class")%>%
+           gsub(pattern = "f__.*$",replacement = "Family")%>%
+           gsub(pattern = "g__.*$",replacement = "Genus")),
+         levels = c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus"))
+
+
+#check summary
+summarized_df_dist_to_centroid<-
+group_by(.data = beta_disper_comparions_df, centroid_group, taxonomic_group, taxonomic_rank)%>%
+  dplyr::summarize(mean_dist = mean(distance_to_centroid),
+            median_dist = median(distance_to_centroid),
+            sd_dist = sd(distance_to_centroid))
+
+
+```
+
+
+
+## define if beta distribution residuals are bimodal 
+to be kept in the analysis, a taoxnomic group must have a unimodal distribution in distance to centroids for stress, plant species AND block
+
+```{r}
+
+#split beta diversity comparisons into a nested list for lapply
+beta_disper_comparions_df_l<-
+  split(x = beta_disper_comparions_df, f = beta_disper_comparions_df$taxonomic_group)
+
+#run multimode test (takes several minutes to compute)
+multimode_test_l_output<-
+lapply(beta_disper_comparions_df_l, function(x){
+  
+  set.seed(12345)
+  Block_modtest<-modetest(dplyr::filter(x, centroid_group =="Block")$distance_to_centroid)
+    
+  plantSp_modtest<-modetest(dplyr::filter(x, centroid_group =="plant_Sp")$distance_to_centroid)
+  
+  Stress_modtest<-modetest(dplyr::filter(x, centroid_group =="Stress")$distance_to_centroid)
+  
+  output<-list("Block_modtest" = Block_modtest,
+               "plantSp_modtest" = plantSp_modtest,
+               "Stress_modtest" = Stress_modtest)
+  
+  return(output)
+  
+})
+
+# fix two odd family names that were compromising during data wrangling
+names(multimode_test_l_output)[names(multimode_test_l_output) == "f__env"]<-"f__env.OPS_17"
+names(multimode_test_l_output)[names(multimode_test_l_output) == "g__env"]<-"g__env.OPS_17"
+
+#save externally
+save(multimode_test_l_output, file = "./14_Phylogenetic_distance/r_objects/multimode_test_l_output.RData")
+load(file = "./14_Phylogenetic_distance/r_objects/multimode_test_l_output.RData")
+
+
+```
+
+##  put multimode test results into a df, join with 528 permanova df
+```{r}
+#extract p values from the multimode test, put in lsit
+multimode_p_l<-
+lapply(multimode_test_l_output, function(x){
+  block_p_multimode<-x$Block_modtest$p.value
+  plantSp_p_multimode<-x$plantSp_modtest$p.value
+  Stress_p_multimode<-x$Stress_modtest$p.value
+  
+  return(c("block_p_multimode" = block_p_multimode,
+           "plantSp_p_multimode" = plantSp_p_multimode,
+           "Stress_p_multimode" = Stress_p_multimode))
+  
+})
+
+#turn list into df
+multimode_p_df<-
+  as.data.frame(do.call("rbind",multimode_p_l ))
+
+#define if residuals are unimodal in the experimental factors ( number of experiemntal factros where residues are unimodal)
+multimode_p_df$unimodal_residues<-rowCounts(multimode_p_df[,1:3]>0.05)
+multimode_p_df$unimodal_residues001<-rowCounts(multimode_p_df[,1:3]>0.01)
+
+
+
+#put the output of the beta dispersion unimodalisty testing in the permanova df
+multimode_p_df<-rownames_to_column(multimode_p_df, var = "taxonomic_group")
+perm_528_phylosig_pct_df<-left_join(perm_528_phylosig_pct_df,multimode_p_df)
+
+
+
+
+
+
+
+
+```
+
+
+
+## define if residual distributions are similar to control
+```{r}
+
+
+# run Kolmogorov-Smirnov to compare distribution of residuals with k__Bacteria
+ks_l_output<-
+lapply(beta_disper_comparions_df_l, function(x){
+  # run Kolmogorov-Smirnov to define if two samples (k__bacteria and focal taxonomic group) derive from teh same distribution on a varaibles (scaled distances to centroids)
+  
+  ks_Block<-
+    ks.test(x = scale(dplyr::filter(beta_disper_comparions_df_l$k__Bacteria, 
+                         centroid_group == "Block" )$distance_to_centroid),
+           y = scale(dplyr::filter(x, 
+                             centroid_group == "Block" )$distance_to_centroid))
+    
+  ks_Stress<-
+    ks.test(x = scale(dplyr::filter(beta_disper_comparions_df_l$k__Bacteria, 
+                         centroid_group == "Stress" )$distance_to_centroid),
+           y = scale(dplyr::filter(x, 
+                             centroid_group == "Stress" )$distance_to_centroid))
+  
+   
+   ks_plantSp<-
+    ks.test(x = scale(dplyr::filter(beta_disper_comparions_df_l$k__Bacteria, 
+                         centroid_group == "plant_Sp" )$distance_to_centroid),
+           y = scale(dplyr::filter(x, 
+                             centroid_group == "plant_Sp" )$distance_to_centroid))
+  
+  
+  output<-list("ks_Block" = ks_Block,
+               "ks_Stress" = ks_Stress,
+               "ks_plantSp" = ks_plantSp)
+  
+  return(output)
+  
+})
+
+#extract p values from the test, put in lsit
+ks_l_pval<-
+  lapply(ks_l_output, function(x){
+    
+  block_p_ks<-x$ks_Block$p.value
+  plantSp_p_ks<-x$ks_plantSp$p.value
+  Stress_p_ks<-x$ks_Stress$p.value
+  
+  return(c("block_p_ks" = block_p_ks,
+           "plantSp_p_ks" = plantSp_p_ks,
+           "Stress_p_ks" = Stress_p_ks))
+  
+})
+
+
+
+   
+   
+   
+
+#turn list into df
+ks_pval_df<-
+  as.data.frame(do.call("rbind",ks_l_pval ))
+
+#define if residuals are unimodal in all experimental factors (as in number of experiemntal factros)
+ks_pval_df$residue_dist_simialr_to_K__bacteria<-rowCounts(ks_pval_df[,1:3]>0.05)
+ks_pval_df$residue_dist_simialr_to_K__bacteria001<-rowCounts(ks_pval_df[,1:3]>0.01)
+
+#put the output of the beta dispersion unimodalisty testing in the permanova df
+ks_pval_df<-rownames_to_column(ks_pval_df, var = "taxonomic_group")
+perm_528_phylosig_pct_df<-left_join(perm_528_phylosig_pct_df,ks_pval_df)
+
+
+
+```
+
+
+
+## reshape mantel pipeline output to fit permanova df
+```{r}
+
+# remove Jaccard distances, as they provide the same conclusions as bray-curtis
+bac_alltaxa_mantel_pipeline_df_reshaped<-
+  dplyr::filter(bac_alltaxa_mantel_pipeline_df, distance =="Bray")
+
+#remove column that identifies if  the test ws significant
+bac_alltaxa_mantel_pipeline_df_reshaped<-
+  dplyr::select(bac_alltaxa_mantel_pipeline_df_reshaped,  -significant)
+
+# rename some variable to avoid confusion wiht abouheif tests
+names(bac_alltaxa_mantel_pipeline_df_reshaped)[c(3,5)]<-c("distance_Mantel", "p_value_Mantel")
+
+#widen df to have one row per taxonomic group
+bac_alltaxa_mantel_pipeline_df_reshaped<-
+  pivot_wider(bac_alltaxa_mantel_pipeline_df_reshaped, 
+              names_from = "Treatment", 
+              values_from = c("r2_Mantel", "p_value_Mantel"))
+
+
+
+```
+
+
+
+## add mantel pipeline outut to permanova df
+```{r}
+
+perm_528_phylosig_pct_df<-
+  left_join(perm_528_phylosig_pct_df,bac_alltaxa_mantel_pipeline_df_reshaped)
+
+```
+
+## define PCoA variance explained by the PC with highest abouheif
+```{r}
+#re-arrange which is the hgiehr PC
+perm_528_phylosig_pct_df$higher_PC_Control<-
+  gsub(x = perm_528_phylosig_pct_df$trait_Control_Higher_PC, pattern = "_[a-z]_.*", replacement = "")
+
+perm_528_phylosig_pct_df$higher_PC_MeJA<-
+  gsub(x = perm_528_phylosig_pct_df$trait_MeJA_Higher_PC, pattern = "_[a-z]_.*", replacement = "")
+
+perm_528_phylosig_pct_df$higher_PC_SA<-
+  gsub(x = perm_528_phylosig_pct_df$trait_SA_Higher_PC, pattern = "_[a-z]_.*", replacement = "")
+
+# define PCoA_1/ PCoA2 varaince aexplained ratio
+perm_528_phylosig_pct_df$var_explined_ratio_Control<-
+  (perm_528_phylosig_pct_df$PCoA_1_Control_only/perm_528_phylosig_pct_df$PCoA_2_Control_only)
+
+perm_528_phylosig_pct_df$var_explined_ratio_MeJA<-
+  (perm_528_phylosig_pct_df$PCoA_1_MeJA_only/perm_528_phylosig_pct_df$PCoA_2_MeJA_only)
+
+perm_528_phylosig_pct_df$var_explined_ratio_SA<-
+  (perm_528_phylosig_pct_df$PCoA_1_SA_only/perm_528_phylosig_pct_df$PCoA_2_SA_only)
+
+# assing the abouheif value for each PCoA in each treatmet condition, (hard-coded)
+perm_528_phylosig_pct_df$PCoA_1_Control_abouheif_value<-
+  ifelse(test = perm_528_phylosig_pct_df$higher_PC_Control == "PCoA_1",
+         yes = perm_528_phylosig_pct_df$value_Control_Higher_PC,
+         no = perm_528_phylosig_pct_df$value_Control_Lower_PC)
+
+perm_528_phylosig_pct_df$PCoA_2_Control_abouheif_value<-
+  ifelse(test = perm_528_phylosig_pct_df$higher_PC_Control == "PCoA_2",
+         yes = perm_528_phylosig_pct_df$value_Control_Higher_PC,
+         no = perm_528_phylosig_pct_df$value_Control_Lower_PC)
+
+perm_528_phylosig_pct_df$PCoA_1_MeJA_abouheif_value<-
+  ifelse(test = perm_528_phylosig_pct_df$higher_PC_MeJA == "PCoA_1",
+         yes = perm_528_phylosig_pct_df$value_MeJA_Higher_PC,
+         no = perm_528_phylosig_pct_df$value_MeJA_Lower_PC)
+
+perm_528_phylosig_pct_df$PCoA_2_MeJA_abouheif_value<-
+  ifelse(test = perm_528_phylosig_pct_df$higher_PC_MeJA == "PCoA_2",
+         yes = perm_528_phylosig_pct_df$value_MeJA_Higher_PC,
+         no = perm_528_phylosig_pct_df$value_MeJA_Lower_PC)
+
+perm_528_phylosig_pct_df$PCoA_1_SA_abouheif_value<-
+  ifelse(test = perm_528_phylosig_pct_df$higher_PC_SA == "PCoA_1",
+         yes = perm_528_phylosig_pct_df$value_SA_Higher_PC,
+         no = perm_528_phylosig_pct_df$value_SA_Lower_PC)
+
+perm_528_phylosig_pct_df$PCoA_2_SA_abouheif_value<-
+  ifelse(test = perm_528_phylosig_pct_df$higher_PC_SA == "PCoA_2",
+         yes = perm_528_phylosig_pct_df$value_SA_Higher_PC,
+         no = perm_528_phylosig_pct_df$value_SA_Lower_PC)
+
+# assing the % PCoA explained in the PCoA wth higer abouheif
+perm_528_phylosig_pct_df$higher_PC_Control_pct<-
+  ifelse(test = perm_528_phylosig_pct_df$higher_PC_Control == "PCoA_1",
+         yes = perm_528_phylosig_pct_df$PCoA_1_Control_only,
+         no = perm_528_phylosig_pct_df$PCoA_2_Control_only)
+
+perm_528_phylosig_pct_df$lower_PC_Control_pct<-
+  ifelse(test = perm_528_phylosig_pct_df$higher_PC_Control == "PCoA_2",
+         yes = perm_528_phylosig_pct_df$PCoA_1_Control_only,
+         no = perm_528_phylosig_pct_df$PCoA_2_Control_only)
+
+perm_528_phylosig_pct_df$higher_PC_MeJA_pct<-
+  ifelse(test = perm_528_phylosig_pct_df$higher_PC_MeJA == "PCoA_1",
+         yes = perm_528_phylosig_pct_df$PCoA_1_MeJA_only,
+         no = perm_528_phylosig_pct_df$PCoA_2_MeJA_only)
+
+perm_528_phylosig_pct_df$lower_PC_MeJA_pct<-
+  ifelse(test = perm_528_phylosig_pct_df$higher_PC_MeJA == "PCoA_2",
+         yes = perm_528_phylosig_pct_df$PCoA_1_MeJA_only,
+         no = perm_528_phylosig_pct_df$PCoA_2_MeJA_only)
+          
+perm_528_phylosig_pct_df$higher_PC_SA_pct<-
+  ifelse(test = perm_528_phylosig_pct_df$higher_PC_SA == "PCoA_1",
+         yes = perm_528_phylosig_pct_df$PCoA_1_SA_only,
+         no = perm_528_phylosig_pct_df$PCoA_2_SA_only)
+
+perm_528_phylosig_pct_df$lower_PC_SA_pct<-
+  ifelse(test = perm_528_phylosig_pct_df$higher_PC_SA == "PCoA_2",
+         yes = perm_528_phylosig_pct_df$PCoA_1_SA_only,
+         no = perm_528_phylosig_pct_df$PCoA_2_SA_only)
+
+```
+
+
+
+### save processed 528 PERMANOVAS df
+
+```{r}
+# save df of 528 permanovas, % variance, Abouheif values, beta dispersion results
+save(perm_528_phylosig_pct_df, file = "./14_Phylogenetic_distance/r_objects/perm_528_phylosig_pct_df.RData")
+load(file = "./14_Phylogenetic_distance/r_objects/perm_528_phylosig_pct_df.RData")
+view(perm_528_phylosig_pct_df)
+```
+
+# - 
+# data structure check: scree plots, histograms, beta dispersion, PCoAs
+
+## define selected taxonomic groups for a few examples
+```{r}
+#set a few groups as an example for beta dispersion comparsions (shapes of distributions)
+taxonomic_groups_for_dispersion_example<-c("k__Bacteria",
+                                            "p__Proteobacteria",
+                                            "p__Deinococcota",
+                                            "c__Vampirivibrionia",
+                                            "c__Alphaproteobacteria",
+                                            "o__Rhizobiales",
+                                            "o__Fibrobacterales",
+                                            "f__Burkholderiaceae",
+                                            "f__Chitinophagaceae",
+                                            "g__Massilia",
+                                            "f__Spirosomaceae",
+                                            "g__Bacteriovorax")
+
+```
+
+
+## unexplained residuals of the permanovas
+```{r}
+
+#check sumamry of PERMANOVA  unexplained varaicne, all taxonomic groups together
+permanova_r2_residual_quartiles<-
+  perm_528_phylosig_pct_df%>%
+    dplyr::summarise(mean = mean(residual_permanova),
+                     median = median(residual_permanova),
+                     sd = sd(residual_permanova),
+                     quartile_1st = quantile(residual_permanova)[[2]],
+                     quartile_3rd = quantile(residual_permanova)[[4]],
+                     max = max(residual_permanova))
+
+#histogram of unexplauined permanova varince
+residual_permanova_histogram<-
+ggplot(perm_528_phylosig_pct_df, aes(x = residual_permanova))+
+  geom_histogram()+
+  geom_vline(xintercept = 0.85, color = "red")+
+  geom_label(label= paste("3rd quartile of distribution:", 
+                          round(permanova_r2_residual_quartiles[[1,5]],3), 
+                          sep = " "),
+             x = 0.65,
+             y = 60)+
+  xlab("R2 of residuals in PERMANOVAs")+
+  ylab("Number of taxonomic groups")
+
+
+permanova_r2_residual_quartiles_perrank<-
+perm_528_phylosig_pct_df%>%
+group_by(taxonomic_rank)%>%
+  dplyr::summarise(mean = mean(residual_permanova),
+                   median = median(residual_permanova),
+                   sd = sd(residual_permanova),
+                   quartile_1st = quantile(residual_permanova)[[2]],
+                   quartile_3rd = quantile(residual_permanova)[[4]],
+                   max = max(residual_permanova))
+
+
+#histogram of unexplauined permanova varince
+residual_permanova_histogram_perrank<-
+ggplot(perm_528_phylosig_pct_df, aes(x = residual_permanova))+
+  geom_histogram()+
+  facet_wrap(~taxonomic_rank)+
+  geom_vline(xintercept = 0.85, color = "red")+
+  xlab("R2 of residuals in PERMANOVAs")+
+  ylab("Number of taxonomic groups")
+
+#save plot externally
+ggsave(plot = ggarrange(residual_permanova_histogram,
+                        residual_permanova_histogram_perrank,
+                        labels = "AUTO"),
+       filename = "./14_Phylogenetic_distance/results/Results_April2023/histogram_permanova_residuals.svg",
+       width = 250,
+       height = 90,
+       units = "mm")
+
+```
+
+
+## screeplot of explained variance per PC, with broken stick
+```{r}
+
+# preapre to save pdf file
+pdf("./14_Phylogenetic_distance/results/Results_April2023/Eigenvalues_f__Chitinophagaceae_top_f__Burkholderiaceae_bottom.pdf",
+    width = 20,
+    height = 7) 
+
+# screeplot of explained variance per PC, with broken stick
+evplot(PCoA_528_3x_plots_axis_pct$PCoA_l_Control$f__Chitinophagaceae$values$Eigenvalues)
+evplot(PCoA_528_3x_plots_axis_pct$PCoA_l_Control$f__Burkholderiaceae$values$Eigenvalues)
+dev.off() 
+
+
+```
+
+
+## selected PCoA plots
+```{r}
+
+
+# put the same taxons as PCoA plots
+mode_type_PCoA_pannel_l<-
+  PCoA_528_plots_axis_pct$ploted_ordination[taxonomic_groups_for_dispersion_example]
+
+mode_type_PCoA_pannel<-
+ggarrange(plotlist = mode_type_PCoA_pannel_l, common.legend = TRUE)
+
+#put histograms next to PCoA plots
+ggsave(plot = mode_type_PCoA_pannel,
+       filename = "./14_Phylogenetic_distance/results/Results_April2023/PCoAs_selected_examples.pdf",
+       width = 300,
+       height = 250,
+       units = "mm")
+
+```
+
+##  ratio of PCoA explained variance (PCoA1/PCoA2)
+```{r}
+#check sumamry of PCOA  varaicne 9PC_1 /PC_2)
+var_explain_ratio_df<-
+perm_528_phylosig_pct_df%>%
+  dplyr::summarise(mean = mean(var_explined_ratio),
+                   median = median(var_explined_ratio),
+                   sd = sd(var_explined_ratio),
+                   quartile_1st = quantile(var_explined_ratio)[[2]],
+                   quartile_3rd = quantile(var_explined_ratio)[[4]],
+                   max = max(var_explined_ratio))
+
+
+#histogram of PCoA variance explained, all 528 taxonomic groups
+hist_var_explained_ratio<-
+ggplot(perm_528_phylosig_pct_df, aes(x = var_explined_ratio))+
+  geom_histogram()+
+  geom_vline(xintercept = 1.25, color = "red")+
+  geom_label(label= paste("1st quartile of distribution:", 
+                          round(var_explain_ratio_df[[1,4]],3), 
+                          sep = " "),
+             x = 4,
+             y = 100)+
+  xlab("% of variance explained in PCoA_1 / \n % of variance explained in PCoA_2")+
+  ylab("Number of taxonomic groups")
+
+
+
+
+# check quartiles per taxonomic rank
+perm_528_phylosig_pct_df%>%
+group_by(taxonomic_rank)%>%
+  dplyr::summarise(mean = mean(var_explined_ratio),
+                   median = median(var_explined_ratio),
+                   sd = sd(var_explined_ratio),
+                   quartile_1st = quantile(var_explined_ratio)[[2]],
+                   quartile_3rd = quantile(var_explined_ratio)[[4]],
+                   max = max(var_explined_ratio))
+
+
+#histogram of PCoA variance explained, split per taxonomic rank
+hist_var_explained_ratio_perrank<-
+ggplot(perm_528_phylosig_pct_df, aes(x = var_explined_ratio))+
+  geom_histogram()+
+  facet_wrap(~taxonomic_rank)+
+  geom_vline(xintercept = 1.25, color = "red")+
+   xlab("% of variance explained in PCoA_1 / \n % of variance explained in PCoA_2")+
+  ylab("Number of taxonomic groups")
+
+
+#save plot externally
+ggsave(plot = ggarrange(hist_var_explained_ratio,
+                        hist_var_explained_ratio_perrank,
+                        labels = "AUTO"),
+       filename = "./14_Phylogenetic_distance/results/Results_April2023/histogram_var_explained_ratio.svg",
+       width = 250,
+       height = 90,
+       units = "mm")
+
+
+```
+
+
+
+
+##  plots of beta dispersion
+```{r}
+# plots of beta dispersion
+pdf("./14_Phylogenetic_distance/results/Results_April2023/betadisper_k__Bacteria_c__Vampirivibrionia.pdf",
+    width = 7,
+    height = 7) 
+
+
+plot(permanovas_spXstress_528$beta_disper_l$k__Bacteria$beta_disper_block)
+plot(permanovas_spXstress_528$beta_disper_l$k__Bacteria$beta_disper_sp)
+plot(permanovas_spXstress_528$beta_disper_l$k__Bacteria$beta_disper_stress)
+
+plot(permanovas_spXstress_528$beta_disper_l$c__Vampirivibrionia$beta_disper_block)
+plot(permanovas_spXstress_528$beta_disper_l$c__Vampirivibrionia$beta_disper_sp)
+plot(permanovas_spXstress_528$beta_disper_l$c__Vampirivibrionia$beta_disper_stress)
+dev.off() 
+
+
+                          
+
+
+plot(permanovas_spXstress_528$beta_disper_l$f__Spirosomaceae$beta_disper_block)
+
+
+
+
+```
+
+
+
+##  beta dispersion histgram next to PCoA of a few taxonomies
+
+```{r}
+#subset df, adjust order of factors to reflect artefacts
+df_for_betadisp_histogram<-
+  dplyr::filter(beta_disper_comparions_df, taxonomic_group  %in% taxonomic_groups_for_dispersion_example)
+
+df_for_betadisp_histogram$taxonomic_group<-factor(df_for_betadisp_histogram$taxonomic_group, 
+                                                  levels = taxonomic_groups_for_dispersion_example)
+
+
+
+# check p values for multimodal testing and similarity to distribution in control
+multimode_p_df_filt<-
+  multimode_p_df[multimode_p_df$taxonomic_group %in% taxonomic_groups_for_dispersion_example,1:4]
+
+ks_pval_df_filt<-
+  ks_pval_df[ks_pval_df$taxonomic_group %in% taxonomic_groups_for_dispersion_example,1:4]
+
+ks_pval_df_filt[,2:4]<-round(ks_pval_df_filt[,2:4], 3) # round up numbers, reduce decimals
+
+
+
+
+
+
+# join dfs
+multimode_ks_df_filt<-
+  left_join(multimode_p_df_filt, ks_pval_df_filt)
+
+multimode_ks_df_filt<-
+  pivot_longer(data = multimode_ks_df_filt, 
+              cols = !taxonomic_group,
+              names_to ="Experimental_factor",
+              values_to = "p_values")
+
+multimode_ks_df_filt<-
+  tidyr::separate(data = multimode_ks_df_filt,
+                  col = Experimental_factor,
+                  into = c("centroid_group", "test"),
+                  sep = "_p_")
+
+# export table with results, so they can be pasted, by hand, on the histogram on inskcape. sorry!
+write.table(multimode_ks_df_filt,
+            file = "./14_Phylogenetic_distance/results/Results_April2023/betadisper_histograms_tests_pval.txt")
+
+#check a few histograms of distances to centroids
+Histogram_pannel<-
+df_for_betadisp_histogram%>%
+  ggplot(aes(x = distance_to_centroid, fill = centroid_group))+
+           geom_histogram()+
+  scale_fill_discrete(name = "Experimental factor", 
+                      labels = c("Block", "Plant species", "Experimental treatment"))+
+  theme(legend.position="top")+
+  ylab("Number of datapoints (samples)")+
+  xlab("Distance to respective centroid")+
+  facet_wrap(~taxonomic_group) 
+
+
+
+
+
+#save histograms of ebta dispersion
+ggsave(plot =Histogram_pannel,
+       filename = "./14_Phylogenetic_distance/results/Results_April2023/betadisper_histograms.pdf",
+       width = 250,
+       height = 200,
+       units = "mm")
+
+
+
+
+
+
+```
+
+## mantel correlation r2 and p for chitinophageaceae and burkholderiacea
+
+```{r}
+#subset df
+mantel_f__Chitinophagaceae_f__Burkholderiaceae_df<-
+  dplyr::filter(bac_alltaxa_mantel_pipeline_df, 
+                taxonomic_group %in% c("f__Chitinophagaceae", "f__Burkholderiaceae"),
+                distance == "Bray")
+
+#rename first column t fit old function
+names(mantel_f__Chitinophagaceae_f__Burkholderiaceae_df)[1]<-"Community"
+
+# make individual mantel plot
+mantel_example_f__Chitinophagaceae_f__Burkholderiaceae<-
+  plot_mantel_correlations(mantel_f__Chitinophagaceae_f__Burkholderiaceae_df, quoted_plot_title = "")
+
+#export example mantel plot with r2 and p values
+ggsave(mantel_example_f__Chitinophagaceae_f__Burkholderiaceae,
+       width = 180,
+       height = 120,
+       units = "mm",
+       filename = "./14_Phylogenetic_distance/results/Results_April2023/mantel_r2_p_f__Chitinophagaceae_f__Burkholderiaceae.pdf",)
+
+
+
+#export example mantel plot pariiwise comparisons among samples
+ggsave(ggarrange(bac_alltaxa_mantel_pipeline_bray_correlation_plot$f__Chitinophagaceae,
+                 bac_alltaxa_mantel_pipeline_bray_correlation_plot$f__Burkholderiaceae,
+                 ncol = 2),
+       width = 450,
+       height = 350,
+       units = "mm",
+       filename = "./14_Phylogenetic_distance/results/Results_April2023/mantel_pairwise_f__Chitinophagaceae_f__Burkholderiaceae.pdf",)
+
+```
+
+
+
+## PCoA plot of Chitinophagaceae for figure S2 
+this can be useful for the figure S2 pannel
+```{r}
+
+# add extended lineage as metadata
+  ps_example_taxa_l<- lapply(ps_example_taxa_l, function(x){
+    
+  x@sam_data$Sp_Lineage_Walden_extended<-
+    if_else(condition = x@sam_data$Sp_abb_name %in% c("Ia", "Lm", "Co", "Bi"), 
+            true ="lineage_II_extended",
+            false =  x@sam_data$Sp_Lineage_Walden)
+  
+    return(x)
+  
+  })
+
+
+
+# split datset for plotting with PCoA_calculate_extract_add_to_ps function
+Chitinophagaceae_stress_l_l<-lapply(ps_example_taxa_l[7], function(x)
+  phyloseq_sep_variable(physeq = x, variable = "Stress"))
+
+
+
+# calcualte PCoA and add cordiantes t ps object
+Chitinophagaceae_stress_l_l_coordinates<-
+PCoA_calculate_extract_add_to_ps(input_ps_l_l = Chitinophagaceae_stress_l_l,
+                                 original_ps_l = ps_example_taxa_l[7])
+
+
+#extract metadata/PCoA coordinates of Chitinophagaceae SA as df
+df_Chitinophagaceae<-as(sample_data(subset_samples(Chitinophagaceae_stress_l_l_coordinates$f__Chitinophagaceae, Stress =="SA")),
+                 "data.frame")
+
+#calcualte centroid
+cent <- aggregate(cbind(PCoA_1, PCoA_2) ~ Sp_abb_name, data = df_Chitinophagaceae, FUN = mean)
+
+#plot PCoA with enphais on Co
+Chitinophagaceae_SA_enphasys_Co<-
+ggplot(df_Chitinophagaceae, aes(x = PCoA_1, y = PCoA_2, color = Sp_Lineage_Walden_extended))+
+  geom_point()+
+  geom_point(size = ifelse(df_Chitinophagaceae$Sp_abb_name == "Co",4,1))+
+    geom_label(data=cent, 
+             aes(label=Sp_abb_name, 
+                 color = NULL))+
+  theme(plot.title = element_text(size = 10, face = "bold")) +
+  theme(legend.position="top")
+
+#save plto for further editing in inkscape
+ggsave(filename = "./14_Phylogenetic_distance/results/Results_April2023/Chitinophagaceae_SA_PCoA_centroids.svg",
+       plot = Chitinophagaceae_SA_enphasys_Co,
+       width = 110, 
+       height = 110, 
+       units = "mm")
+
+
+
+
+```
+
+
+## abouheif histogram of Chitinophagaceae as part of figure 2 pannel
+in this chunk we: 1) prepare to save the pdf file, 2) rerun pipeline with show_abouheif_histogram = TRUE, return_plot = FALSE; 3) close plot saving device, creating the pdf file
+```{r}
+
+#save Niastella  PCoA Abouheif histogram (last plot) as pdf
+ pdf(file = "./14_Phylogenetic_distance/results/Results_April2023/Chitinophagaceae_Contol_MeJA_SA_PCoA_Abouheif_histogram.pdf",     
+     width = 5, 
+     height = 5) 
+ 
+
+ phylogenetic_signal_pipeline(ps_l = ps_example_taxa_l[7],
+                              phylogenetic_test = "Abouheif's Cmean",
+                              ordination_method = "PCoA",
+                              significant_signal_only = TRUE,
+                              return_plot = FALSE, 
+                              higher_PC_only = FALSE,
+                              return_lambda = FALSE, 
+                              show_abouheif_histogram = TRUE)
+
+
+dev.off()
+
+```
+
+
+# - 
+#  PCA visualization of permanova output: high abouheif PCoA VS low abouheif PCoA
+
+
+this is more convinient, and adequate, than comparing PCoA_1 v PCoA_2 directlty
+
+## PCA Of 528X3 PCOAS, PCoA with higest abouheif vs PCoA with lowest abouheif
+
+```{r}
+##### High_low PC instead of PCoA 1 and PCOA2
+
+# subset, removing unecessary columns
+abouhf_528x3_phylosig_df_subset_highlow<-
+dplyr::select(perm_528_phylosig_pct_df, 
+              pvalue_Sp_x_Stress, 
+              pvalue_Sp_full_name,
+              value_Control_Higher_PC,
+              value_Control_Lower_PC,
+              value_MeJA_Higher_PC, 
+              value_MeJA_Lower_PC,
+              value_SA_Higher_PC,
+              value_SA_Lower_PC,
+              higher_PC_Control_pct,
+              higher_PC_MeJA_pct,
+              higher_PC_SA_pct,
+              lower_PC_Control_pct,
+              lower_PC_MeJA_pct,
+              lower_PC_SA_pct,
+              var_explined_ratio_Control,
+              var_explined_ratio_MeJA,
+              var_explined_ratio_SA,
+              Library_size_Control,
+              Library_size_MeJA,
+              Library_size_SA)
+
+
+#tunr library size to log scale
+abouhf_528x3_phylosig_df_subset_highlow$Library_size_Control<-
+  log(abouhf_528x3_phylosig_df_subset_highlow$Library_size_Control)
+abouhf_528x3_phylosig_df_subset_highlow$Library_size_MeJA<-
+  log(abouhf_528x3_phylosig_df_subset_highlow$Library_size_MeJA)
+abouhf_528x3_phylosig_df_subset_highlow$Library_size_SA<-
+  log(abouhf_528x3_phylosig_df_subset_highlow$Library_size_SA)
+
+
+
+# only significant  interaction
+pca_res_528x3_abouheifs_highlow<-
+  prcomp(abouhf_528x3_phylosig_df_subset_highlow,
+         scale. = TRUE)
+
+
+pca_plot_528x3_abouheifs_highlow<-
+autoplot(pca_res_528x3_abouheifs_highlow, 
+         data =  perm_528_phylosig_pct_df,
+         colour = "taxonomic_rank",
+         loadings = TRUE, 
+         loadings.colour = 'blue', 
+          size = 3,
+         loadings.label = TRUE, 
+         loadings.label.repel=T,
+         loadings.label.size = 3)+
+         theme(legend.position="bottom")
+
+
+
+
+```
+
+
+
+
+
+## Correlation plots related to the  528x3 PCoAs, PCoA with higest abouheif vs PCoA with lowest abouhei
+```{r}
+### plots of higher and lower PCs
+corplot_control_abuheif_high_PC<-
+ggplot(perm_528_phylosig_pct_df,
+       aes(x = higher_PC_Control_pct,y = value_Control_Higher_PC, color =taxonomic_rank, alpha = 0.8))+
+     geom_point( aes(size = log(Library_size_Control)))+
+     #facet_wrap(~Stress)+
+  stat_cor(method = "pearson",
+           p.accuracy = 0.001, 
+           r.accuracy = 0.01,
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")),
+           color = "Black")+
+  geom_smooth(method = "lm",
+              formula = y ~ x,
+              colour = "Black" )  +
+  xlab("% var. explained in PCoA axis with \n higher abouheif value, Control samples")+
+  ylab("Higher of two Abouheif values, Control Samples")
+
+corplot_control_abuheif_low_pc<-
+ggplot(perm_528_phylosig_pct_df, 
+       aes(x = lower_PC_Control_pct,y = value_Control_Lower_PC, color =taxonomic_rank, alpha = 0.8))+
+     geom_point( aes(size = log(Library_size_Control)))+
+     #facet_wrap(~Stress)+
+  stat_cor(method = "pearson",
+           p.accuracy = 0.001, 
+           r.accuracy = 0.01,
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")),
+           color = "Black")+
+  geom_smooth(method = "lm",
+              formula = y ~ x,
+              colour = "Black" )  +
+  xlab("% var. explained in PCoA axis with \n lower abouheif value, Control samples")+
+  ylab("Lower of two Abouheif values, Control Samples")
+
+
+
+
+corplot_MeJA_abuheif_high_PC<-
+ggplot(perm_528_phylosig_pct_df,
+       aes(x = higher_PC_MeJA_pct,y = value_MeJA_Higher_PC, color =taxonomic_rank, alpha = 0.8))+
+     geom_point( aes(size = log(Library_size_MeJA)))+
+     #facet_wrap(~Stress)+
+  stat_cor(method = "pearson",
+           p.accuracy = 0.001, 
+           r.accuracy = 0.01,
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")),
+           color = "Black")+
+  geom_smooth(method = "lm",
+              formula = y ~ x,
+              colour = "Black" )  +
+  xlab("% var. explained in PCoA axis with \n higher abouheif value, MeJA samples")+
+  ylab("Higher of two Abouheif values, MeJA Samples")
+
+corplot_MeJA_abuheif_low_pc<-
+ggplot(perm_528_phylosig_pct_df, 
+       aes(x = lower_PC_MeJA_pct,y = value_MeJA_Lower_PC, color =taxonomic_rank, alpha = 0.8))+
+     geom_point( aes(size = log(Library_size_MeJA)))+
+     #facet_wrap(~Stress)+
+  stat_cor(method = "pearson",
+           p.accuracy = 0.001, 
+           r.accuracy = 0.01,
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")),
+           color = "Black")+
+  geom_smooth(method = "lm",
+              formula = y ~ x,
+              colour = "Black" )  +
+  xlab("% var. explained in PCoA axis with \n lower abouheif value, MeJA samples")+
+  ylab("Lower of two Abouheif values, MeJA Samples")
+
+
+
+
+corplot_SA_abuheif_high_PC<-
+ggplot(perm_528_phylosig_pct_df,
+       aes(x = higher_PC_SA_pct,y = value_SA_Higher_PC, color =taxonomic_rank, alpha = 0.8))+
+     geom_point( aes(size = log(Library_size_SA)))+
+     #facet_wrap(~Stress)+
+  stat_cor(method = "pearson",
+           p.accuracy = 0.001, 
+           r.accuracy = 0.01,
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")),
+           color = "Black")+
+  geom_smooth(method = "lm",
+              formula = y ~ x,
+              colour = "Black" )  +
+  xlab("% var. explained in PCoA axis with \n higher abouheif value, SA samples")+
+  ylab("Higher of two Abouheif values, SA Samples")
+
+corplot_SA_abuheif_low_pc<-
+ggplot(perm_528_phylosig_pct_df, 
+       aes(x = lower_PC_SA_pct,y = value_SA_Lower_PC, color =taxonomic_rank, alpha = 0.8))+
+     geom_point( aes(size = log(Library_size_SA)))+
+     #facet_wrap(~Stress)+
+  stat_cor(method = "pearson",
+           p.accuracy = 0.001, 
+           r.accuracy = 0.01,
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")),
+           color = "Black")+
+  geom_smooth(method = "lm",
+              formula = y ~ x,
+              colour = "Black" )+
+  xlab("% var. explained in PCoA axis with \n lower abouheif value, SA samples")+
+  ylab("Lower of two Abouheif values, SA Samples")
+
+
+
+#panels of high_low abouheif PCoA splits
+panel_high_low_PCoA_Abouheif<-
+ggarrange(corplot_control_abuheif_high_PC + facet_wrap(~taxonomic_rank, nrow = 1),
+          corplot_MeJA_abuheif_high_PC + facet_wrap(~taxonomic_rank, nrow = 1),
+          corplot_SA_abuheif_high_PC + facet_wrap(~taxonomic_rank, nrow = 1),
+          corplot_control_abuheif_low_pc + facet_wrap(~taxonomic_rank, nrow = 1),
+          corplot_MeJA_abuheif_low_pc + facet_wrap(~taxonomic_rank, nrow = 1),
+          corplot_SA_abuheif_low_pc + facet_wrap(~taxonomic_rank, nrow = 1),
+          common.legend = TRUE, 
+          legend = "bottom",
+            ncol = 1, 
+            nrow = 6)
+
+
+
+
+### plots of higher and lower PCs library size VS aouheif sinal
+corplot_control_LibSize_abuheif_high_PC<-
+ggplot(perm_528_phylosig_pct_df,
+       aes(x = log(Library_size_Control),y = value_Control_Higher_PC, color =taxonomic_rank, alpha = 0.8))+
+     geom_point( aes(size = log(Library_size_Control)))+
+     #facet_wrap(~Stress)+
+  stat_cor(method = "pearson",
+           p.accuracy = 0.001, 
+           r.accuracy = 0.01,
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")),
+           color = "Black")+
+  geom_smooth(method = "lm",
+              formula = y ~ x,
+              colour = "Black" )  +
+  xlab("log of Library size, Control samples")+
+  ylab("Higher of two Abouheif values, Control Samples")
+
+corplot_control_LibSize_abuheif_low_pc<-
+ggplot(perm_528_phylosig_pct_df, 
+       aes(x = log(Library_size_Control),y = value_Control_Lower_PC, color =taxonomic_rank, alpha = 0.8))+
+     geom_point( aes(size = log(Library_size_Control)))+
+     #facet_wrap(~Stress)+
+  stat_cor(method = "pearson",
+           p.accuracy = 0.001, 
+           r.accuracy = 0.01,
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")),
+           color = "Black")+
+  geom_smooth(method = "lm",
+              formula = y ~ x,
+              colour = "Black" )  +
+  xlab("log of Library size, Control samples")+
+  ylab("Lower of two Abouheif values, Control Samples")
+
+
+
+
+corplot_MeJA_LibSize_abuheif_high_PC<-
+ggplot(perm_528_phylosig_pct_df,
+       aes(x = log(Library_size_MeJA),y = value_MeJA_Higher_PC, color =taxonomic_rank, alpha = 0.8))+
+     geom_point( aes(size = log(Library_size_MeJA)))+
+     #facet_wrap(~Stress)+
+  stat_cor(method = "pearson",
+           p.accuracy = 0.001, 
+           r.accuracy = 0.01,
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")),
+           color = "Black")+
+  geom_smooth(method = "lm",
+              formula = y ~ x,
+              colour = "Black" )  +
+  xlab("log of Library size, MeJA samples")+
+  ylab("Higher of two Abouheif values, MeJA Samples")
+
+corplot_MeJA_LibSize_abuheif_low_pc<-
+ggplot(perm_528_phylosig_pct_df, 
+       aes(x = log(Library_size_MeJA),y = value_MeJA_Lower_PC, color =taxonomic_rank, alpha = 0.8))+
+     geom_point( aes(size = log(Library_size_MeJA)))+
+     #facet_wrap(~Stress)+
+  stat_cor(method = "pearson",
+           p.accuracy = 0.001, 
+           r.accuracy = 0.01,
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")),
+           color = "Black")+
+  geom_smooth(method = "lm",
+              formula = y ~ x,
+              colour = "Black" )  +
+  xlab("log of Library size, MeJA samples")+
+  ylab("Lower of two Abouheif values, MeJA Samples")
+
+
+
+
+corplot_SA_LibSize_abuheif_high_PC<-
+ggplot(perm_528_phylosig_pct_df,
+       aes(x = log(Library_size_SA),y = value_SA_Higher_PC, color =taxonomic_rank, alpha = 0.8))+
+     geom_point( aes(size = log(Library_size_SA)))+
+     #facet_wrap(~Stress)+
+  stat_cor(method = "pearson",
+           p.accuracy = 0.001, 
+           r.accuracy = 0.01,
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")),
+           color = "Black")+
+  geom_smooth(method = "lm",
+              formula = y ~ x,
+              colour = "Black" )  +
+  xlab("log of Library size, SA samples")+
+  ylab("Higher of two Abouheif values, SA Samples")
+
+corplot_SA_LibSize_abuheif_low_pc<-
+ggplot(perm_528_phylosig_pct_df, 
+       aes(x = log(Library_size_SA),y = value_SA_Lower_PC, color =taxonomic_rank, alpha = 0.8))+
+     geom_point( aes(size = log(Library_size_SA)))+
+     #facet_wrap(~Stress)+
+  stat_cor(method = "pearson",
+           p.accuracy = 0.001, 
+           r.accuracy = 0.01,
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")),
+           color = "Black")+
+  geom_smooth(method = "lm",
+              formula = y ~ x,
+              colour = "Black" )+
+  xlab("log of Library size, SA samples")+
+  ylab("Lower of two Abouheif values, SA Samples")
+```
+
+## make Panel with PCoA + correlations, 528x3 PCoA  with higest abouheif vs PCoA with lowest abouheif
+```{r}
+#panels of high_low abouheif PCoA splits
+panel_high_low_PCoA_LibSize_Abouheif<-
+ggarrange(corplot_control_LibSize_abuheif_high_PC + facet_wrap(~taxonomic_rank, nrow = 1),
+          corplot_MeJA_LibSize_abuheif_high_PC + facet_wrap(~taxonomic_rank, nrow = 1),
+          corplot_SA_LibSize_abuheif_high_PC + facet_wrap(~taxonomic_rank, nrow = 1),
+          corplot_control_LibSize_abuheif_low_pc + facet_wrap(~taxonomic_rank, nrow = 1),
+          corplot_MeJA_LibSize_abuheif_low_pc + facet_wrap(~taxonomic_rank, nrow = 1),
+          corplot_SA_LibSize_abuheif_low_pc + facet_wrap(~taxonomic_rank, nrow = 1),
+          common.legend = TRUE, 
+          legend = "bottom",
+            ncol = 1, 
+            nrow = 6)
+
+
+
+# join with respective PCA plot of varaibles
+panel_high_low_Abouheif_528_PCA<-
+  ggarrange(pca_plot_528x3_abouheifs_highlow,
+            panel_high_low_PCoA_LibSize_Abouheif,
+            panel_high_low_PCoA_Abouheif,
+            ncol = 3, 
+            widths = c(1,2,2))
+
+ggsave(panel_high_low_Abouheif_528_PCA,
+       filename = "./14_Phylogenetic_distance/results/Results_April2023/PCA_panel_highlow_528_Abouheif.svg",
+       width = 700,
+       height = 525,
+       units = "mm")
+
+
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#-
+# filter the 528 permanovas
+
+## define taxa that pass and fail the filtering
+
+```{r}
+
+
+
+
+########## filtering to permanovas of interest
+filtered_permavonas<-
+  dplyr::filter(perm_528_phylosig_pct_df, 
+                pvalue_Sp_x_Stress<0.05 , # keep significant interaction 
+                residual_permanova<0.85, # remove very ghie residuals (top qurtile of unexplained PERMANOVA varaince)
+                var_explined_ratio>1.25,# remove taxas whose first PC dosen't explain at least 1.25 times PC2 (first quartile of PCOAs)
+                unimodal_residues001 >=2,
+               residue_dist_simialr_to_K__bacteria001 >=2)
+
+
+#remove f__uncultured and g__uncultured.. they put different unidentified microbes together
+filtered_permavonas<-filtered_permavonas[filtered_permavonas$taxonomic_group != "f__uncultured",]
+filtered_permavonas<-filtered_permavonas[filtered_permavonas$taxonomic_group != "g__uncultured",]
+
+
+#save externally
+save(filtered_permavonas, file = "./14_Phylogenetic_distance/r_objects/filtered_permavonas.RData")
+
+
+#define taxaonomic groups that passed all filters
+filtered_taxonomic_groups<-filtered_permavonas$taxonomic_group
+
+#make subset of plots,
+filtered_PCOA_plots<-
+  PCoA_528_plots_axis_pct$ploted_ordination[filtered_taxonomic_groups]
+
+#arrange in a single plot
+filtered_PCOA_plots<-
+ggarrange(plotlist = filtered_PCOA_plots,
+          common.legend = TRUE)
+
+#save
+ggsave(filtered_PCOA_plots, 
+       filename = "./14_Phylogenetic_distance/results/Results_April2023/Filtered_PCOA_plots_3filt_p001min2.pdf",
+     width = 1900, 
+     height = 1900, 
+     limitsize  = FALSE,
+     units = "mm")
+
+
+
+#define taxaonomic groups that FAILED all filters
+discarded_taxonomic_groups<- dplyr::filter(perm_528_phylosig_pct_df,  
+                                           !(taxonomic_group  %in% filtered_permavonas$taxonomic_group))$taxonomic_group
+
+#make subset of plots,
+discarded_PCOA_plots<-
+  PCoA_528_plots_axis_pct$ploted_ordination[discarded_taxonomic_groups]
+
+#arrange in a single plot
+discarded_taxonomic_groups<-
+ggarrange(plotlist = discarded_taxonomic_groups,
+          common.legend = TRUE)
+
+
+#save
+ggsave(discarded_taxonomic_groups, 
+       filename = "./14_Phylogenetic_distance/results/Results_April2023/Discarded_PCOA_plots_residual085_varratio125_KS2_unimodal2.pdf",
+     width = 1900, 
+     height = 1900, 
+     limitsize  = FALSE,
+     units = "mm")
+
+
+
+
+         
+```
+
+
+
+## PCA of FILTERED PERMANVOAS
+
+```{r}
+##### High_low PC instead of PCoA 1 and PCOA2
+
+# subset, removing unecessary columns
+abouhf_528x3_phylosig_df_subset_highlow<-
+dplyr::select(filtered_permavonas, 
+              pvalue_Sp_x_Stress, 
+              pvalue_Sp_full_name,
+              value_Control_Higher_PC,
+              value_Control_Lower_PC,
+              value_MeJA_Higher_PC, 
+              value_MeJA_Lower_PC,
+              value_SA_Higher_PC,
+              value_SA_Lower_PC,
+              higher_PC_Control_pct,
+              higher_PC_MeJA_pct,
+              higher_PC_SA_pct,
+              lower_PC_Control_pct,
+              lower_PC_MeJA_pct,
+              lower_PC_SA_pct,
+              var_explined_ratio_Control,
+              var_explined_ratio_MeJA,
+              var_explined_ratio_SA,
+              Library_size_Control,
+              Library_size_MeJA,
+              Library_size_SA)
+
+
+#tunr library size to log scale
+abouhf_528x3_phylosig_df_subset_highlow$Library_size_Control<-
+  log(abouhf_528x3_phylosig_df_subset_highlow$Library_size_Control)
+abouhf_528x3_phylosig_df_subset_highlow$Library_size_MeJA<-
+  log(abouhf_528x3_phylosig_df_subset_highlow$Library_size_MeJA)
+abouhf_528x3_phylosig_df_subset_highlow$Library_size_SA<-
+  log(abouhf_528x3_phylosig_df_subset_highlow$Library_size_SA)
+
+
+
+# only significant  interaction
+pca_res_528x3_abouheifs_sig_int_highlow<-
+  prcomp(dplyr::filter(abouhf_528x3_phylosig_df_subset_highlow, pvalue_Sp_x_Stress<0.05),
+         scale. = TRUE)
+
+
+pca_plot_528x3_abouheifs_sig_int_highlow<-
+autoplot(pca_res_528x3_abouheifs_sig_int_highlow, 
+         data =  dplyr::filter(perm_528_phylosig_pct_df, pvalue_Sp_x_Stress<0.05),
+         colour = "taxonomic_rank",
+         loadings = TRUE, 
+         loadings.colour = 'blue', 
+          size = 3,
+         loadings.label = TRUE, 
+         loadings.label.repel=T,
+         loadings.label.size = 3)+
+         theme(legend.position="bottom")
+
+
+
+
+```
+
+
+
+
+
+## Correlation plots related to the  528x3 PCoAs, PCoA with higest abouheif vs PCoA with lowest abouhei
+```{r}
+### plots of higher and lower PCs
+corplot_control_abuheif_high_PC<-
+ggplot(perm_528_phylosig_pct_df_sigInt,
+       aes(x = higher_PC_Control_pct,y = value_Control_Higher_PC, color =taxonomic_rank, alpha = 0.8))+
+     geom_point( aes(size = log(Library_size_Control)))+
+     #facet_wrap(~Stress)+
+  stat_cor(method = "pearson",
+           p.accuracy = 0.001, 
+           r.accuracy = 0.01,
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")),
+           color = "Black")+
+  geom_smooth(method = "lm",
+              formula = y ~ x,
+              colour = "Black" )  +
+  xlab("% var. explained in PCoA axis with \n higher abouheif value, Control samples")+
+  ylab("Higher of two Abouheif values, Control Samples")
+
+corplot_control_abuheif_low_pc<-
+ggplot(perm_528_phylosig_pct_df_sigInt, 
+       aes(x = lower_PC_Control_pct,y = value_Control_Lower_PC, color =taxonomic_rank, alpha = 0.8))+
+     geom_point( aes(size = log(Library_size_Control)))+
+     #facet_wrap(~Stress)+
+  stat_cor(method = "pearson",
+           p.accuracy = 0.001, 
+           r.accuracy = 0.01,
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")),
+           color = "Black")+
+  geom_smooth(method = "lm",
+              formula = y ~ x,
+              colour = "Black" )  +
+  xlab("% var. explained in PCoA axis with \n lower abouheif value, Control samples")+
+  ylab("Lower of two Abouheif values, Control Samples")
+
+
+
+
+corplot_MeJA_abuheif_high_PC<-
+ggplot(perm_528_phylosig_pct_df_sigInt,
+       aes(x = higher_PC_MeJA_pct,y = value_MeJA_Higher_PC, color =taxonomic_rank, alpha = 0.8))+
+     geom_point( aes(size = log(Library_size_MeJA)))+
+     #facet_wrap(~Stress)+
+  stat_cor(method = "pearson",
+           p.accuracy = 0.001, 
+           r.accuracy = 0.01,
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")),
+           color = "Black")+
+  geom_smooth(method = "lm",
+              formula = y ~ x,
+              colour = "Black" )  +
+  xlab("% var. explained in PCoA axis with \n higher abouheif value, MeJA samples")+
+  ylab("Higher of two Abouheif values, MeJA Samples")
+
+corplot_MeJA_abuheif_low_pc<-
+ggplot(perm_528_phylosig_pct_df_sigInt, 
+       aes(x = lower_PC_MeJA_pct,y = value_MeJA_Lower_PC, color =taxonomic_rank, alpha = 0.8))+
+     geom_point( aes(size = log(Library_size_MeJA)))+
+     #facet_wrap(~Stress)+
+  stat_cor(method = "pearson",
+           p.accuracy = 0.001, 
+           r.accuracy = 0.01,
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")),
+           color = "Black")+
+  geom_smooth(method = "lm",
+              formula = y ~ x,
+              colour = "Black" )  +
+  xlab("% var. explained in PCoA axis with \n lower abouheif value, MeJA samples")+
+  ylab("Lower of two Abouheif values, MeJA Samples")
+
+
+
+
+corplot_SA_abuheif_high_PC<-
+ggplot(perm_528_phylosig_pct_df_sigInt,
+       aes(x = higher_PC_SA_pct,y = value_SA_Higher_PC, color =taxonomic_rank, alpha = 0.8))+
+     geom_point( aes(size = log(Library_size_SA)))+
+     #facet_wrap(~Stress)+
+  stat_cor(method = "pearson",
+           p.accuracy = 0.001, 
+           r.accuracy = 0.01,
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")),
+           color = "Black")+
+  geom_smooth(method = "lm",
+              formula = y ~ x,
+              colour = "Black" )  +
+  xlab("% var. explained in PCoA axis with \n higher abouheif value, SA samples")+
+  ylab("Higher of two Abouheif values, SA Samples")
+
+corplot_SA_abuheif_low_pc<-
+ggplot(perm_528_phylosig_pct_df_sigInt, 
+       aes(x = lower_PC_SA_pct,y = value_SA_Lower_PC, color =taxonomic_rank, alpha = 0.8))+
+     geom_point( aes(size = log(Library_size_SA)))+
+     #facet_wrap(~Stress)+
+  stat_cor(method = "pearson",
+           p.accuracy = 0.001, 
+           r.accuracy = 0.01,
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")),
+           color = "Black")+
+  geom_smooth(method = "lm",
+              formula = y ~ x,
+              colour = "Black" )+
+  xlab("% var. explained in PCoA axis with \n lower abouheif value, SA samples")+
+  ylab("Lower of two Abouheif values, SA Samples")
+
+
+
+#panels of high_low abouheif PCoA splits
+panel_high_low_PCoA_Abouheif<-
+ggarrange(corplot_control_abuheif_high_PC + facet_wrap(~taxonomic_rank, nrow = 1),
+          corplot_MeJA_abuheif_high_PC + facet_wrap(~taxonomic_rank, nrow = 1),
+          corplot_SA_abuheif_high_PC + facet_wrap(~taxonomic_rank, nrow = 1),
+          corplot_control_abuheif_low_pc + facet_wrap(~taxonomic_rank, nrow = 1),
+          corplot_MeJA_abuheif_low_pc + facet_wrap(~taxonomic_rank, nrow = 1),
+          corplot_SA_abuheif_low_pc + facet_wrap(~taxonomic_rank, nrow = 1),
+          common.legend = TRUE, 
+          legend = "bottom",
+            ncol = 1, 
+            nrow = 6)
+
+
+
+
+### plots of higher and lower PCs library size VS aouheif sinal
+corplot_control_LibSize_abuheif_high_PC<-
+ggplot(perm_528_phylosig_pct_df_sigInt,
+       aes(x = log(Library_size_Control),y = value_Control_Higher_PC, color =taxonomic_rank, alpha = 0.8))+
+     geom_point( aes(size = log(Library_size_Control)))+
+     #facet_wrap(~Stress)+
+  stat_cor(method = "pearson",
+           p.accuracy = 0.001, 
+           r.accuracy = 0.01,
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")),
+           color = "Black")+
+  geom_smooth(method = "lm",
+              formula = y ~ x,
+              colour = "Black" )  +
+  xlab("log of Library size, Control samples")+
+  ylab("Higher of two Abouheif values, Control Samples")
+
+corplot_control_LibSize_abuheif_low_pc<-
+ggplot(perm_528_phylosig_pct_df_sigInt, 
+       aes(x = log(Library_size_Control),y = value_Control_Lower_PC, color =taxonomic_rank, alpha = 0.8))+
+     geom_point( aes(size = log(Library_size_Control)))+
+     #facet_wrap(~Stress)+
+  stat_cor(method = "pearson",
+           p.accuracy = 0.001, 
+           r.accuracy = 0.01,
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")),
+           color = "Black")+
+  geom_smooth(method = "lm",
+              formula = y ~ x,
+              colour = "Black" )  +
+  xlab("log of Library size, Control samples")+
+  ylab("Lower of two Abouheif values, Control Samples")
+
+
+
+
+corplot_MeJA_LibSize_abuheif_high_PC<-
+ggplot(perm_528_phylosig_pct_df_sigInt,
+       aes(x = log(Library_size_MeJA),y = value_MeJA_Higher_PC, color =taxonomic_rank, alpha = 0.8))+
+     geom_point( aes(size = log(Library_size_MeJA)))+
+     #facet_wrap(~Stress)+
+  stat_cor(method = "pearson",
+           p.accuracy = 0.001, 
+           r.accuracy = 0.01,
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")),
+           color = "Black")+
+  geom_smooth(method = "lm",
+              formula = y ~ x,
+              colour = "Black" )  +
+  xlab("log of Library size, MeJA samples")+
+  ylab("Higher of two Abouheif values, MeJA Samples")
+
+corplot_MeJA_LibSize_abuheif_low_pc<-
+ggplot(perm_528_phylosig_pct_df_sigInt, 
+       aes(x = log(Library_size_MeJA),y = value_MeJA_Lower_PC, color =taxonomic_rank, alpha = 0.8))+
+     geom_point( aes(size = log(Library_size_MeJA)))+
+     #facet_wrap(~Stress)+
+  stat_cor(method = "pearson",
+           p.accuracy = 0.001, 
+           r.accuracy = 0.01,
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")),
+           color = "Black")+
+  geom_smooth(method = "lm",
+              formula = y ~ x,
+              colour = "Black" )  +
+  xlab("log of Library size, MeJA samples")+
+  ylab("Lower of two Abouheif values, MeJA Samples")
+
+
+
+
+corplot_SA_LibSize_abuheif_high_PC<-
+ggplot(perm_528_phylosig_pct_df_sigInt,
+       aes(x = log(Library_size_SA),y = value_SA_Higher_PC, color =taxonomic_rank, alpha = 0.8))+
+     geom_point( aes(size = log(Library_size_SA)))+
+     #facet_wrap(~Stress)+
+  stat_cor(method = "pearson",
+           p.accuracy = 0.001, 
+           r.accuracy = 0.01,
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")),
+           color = "Black")+
+  geom_smooth(method = "lm",
+              formula = y ~ x,
+              colour = "Black" )  +
+  xlab("log of Library size, SA samples")+
+  ylab("Higher of two Abouheif values, SA Samples")
+
+corplot_SA_LibSize_abuheif_low_pc<-
+ggplot(perm_528_phylosig_pct_df_sigInt, 
+       aes(x = log(Library_size_SA),y = value_SA_Lower_PC, color =taxonomic_rank, alpha = 0.8))+
+     geom_point( aes(size = log(Library_size_SA)))+
+     #facet_wrap(~Stress)+
+  stat_cor(method = "pearson",
+           p.accuracy = 0.001, 
+           r.accuracy = 0.01,
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")),
+           color = "Black")+
+  geom_smooth(method = "lm",
+              formula = y ~ x,
+              colour = "Black" )+
+  xlab("log of Library size, SA samples")+
+  ylab("Lower of two Abouheif values, SA Samples")
+```
+
+## make Panel with PCoA + correlations, 528x3 PCoA  with higest abouheif vs PCoA with lowest abouheif
+```{r}
+#panels of high_low abouheif PCoA splits
+panel_high_low_PCoA_LibSize_Abouheif<-
+ggarrange(corplot_control_LibSize_abuheif_high_PC + facet_wrap(~taxonomic_rank, nrow = 1),
+          corplot_MeJA_LibSize_abuheif_high_PC + facet_wrap(~taxonomic_rank, nrow = 1),
+          corplot_SA_LibSize_abuheif_high_PC + facet_wrap(~taxonomic_rank, nrow = 1),
+          corplot_control_LibSize_abuheif_low_pc + facet_wrap(~taxonomic_rank, nrow = 1),
+          corplot_MeJA_LibSize_abuheif_low_pc + facet_wrap(~taxonomic_rank, nrow = 1),
+          corplot_SA_LibSize_abuheif_low_pc + facet_wrap(~taxonomic_rank, nrow = 1),
+          common.legend = TRUE, 
+          legend = "bottom",
+            ncol = 1, 
+            nrow = 6)
+
+
+
+# join with respective PCA plot of varaibles
+panel_PCoA1_PCoA2_Abouheif_sig_int_PCA<-
+  ggarrange(pca_plot_528x3_abouheifs_sig_int_highlow,
+            panel_high_low_PCoA_LibSize_Abouheif,
+            panel_high_low_PCoA_Abouheif,
+            ncol = 3, 
+            widths = c(1,2,2))
+
+ggsave(panel_PCoA1_PCoA2_Abouheif_sig_int_PCA,
+       filename = "./14_Phylogenetic_distance/results/Results_April2023/panel_highlow_Abouheif_sig_int_PCA.svg",
+       width = 700,
+       height = 525,
+       units = "mm")
+
+
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+* includes permanovas that were no significant
+* check r, p, lib size and PCoA%
+```{r}
+# subset, removing unecessary columns
+perm_filtered_phylosig_df_subset<-#perm_34_phylosig_df_wide
+dplyr::select(filtered_permavonas, 
+              R2_Sp_full_name, 
+              R2_Stress, 
+              R2_Sp_x_Stress, 
+              R2_Block, 
+        #      pvalue_Sp_full_name,
+              pvalue_Stress,
+              pvalue_Sp_x_Stress, 
+              pvalue_Block,
+          #    value_Control_Higher_PC,  
+          #    value_MeJA_Higher_PC, 
+          #    value_SA_Higher_PC, 
+              PCoA_1, 
+              PCoA_2, 
+              Library_size)
+
+#plot a PCA with loadings, large shapes for sinificant sp*stress interaction
+library(ggfortify)
+pca_res_filtered_Permanovas<-
+  prcomp(perm_filtered_phylosig_df_subset, scale. = TRUE)
+
+pca_plot_filtered_Permanovas<-
+autoplot(pca_res_filtered_Permanovas, 
+         data = filtered_permavonas,
+         colour = "taxonomic_rank",
+         loadings = TRUE, 
+         loadings.colour = 'blue', 
+         size = ifelse(test = filtered_permavonas$pvalue_Sp_x_Stress<0.05,
+                       yes = 3 ,
+                       no = 1),
+         loadings.label = TRUE, 
+         loadings.label.repel=T,
+         loadings.label.size = 3)+
+         theme(legend.position="bottom")
+
+
+
+
+
+```
+
+
+## Correlation plots related to the of 34 permanovas
+```{r}
+
+#p values VS library sizes
+pinteract_x_LibSize_plot<-
+ggplot(filtered_permavonas, 
+       aes(x = log(pvalue_Sp_x_Stress) ,y = log(Library_size), color =R2_Sp_x_Stress, alpha = 0.8))+
+     geom_point()+
+     #facet_wrap(~Stress)+
+  stat_cor(method = "pearson",
+           p.accuracy = 0.001, 
+           r.accuracy = 0.01,
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")),
+           color = "Black")+
+  geom_smooth(method = "lm",
+              formula = y ~ x,
+              colour = "Black" )  +
+  xlab("log pvalue Plant_Sp*Treatment")+
+  scale_color_viridis()+
+  ylab("log Library size (unnormalized counts)")+
+  facet_wrap(~taxonomic_rank, nrow =1)
+
+
+#PCoA1 VS library sizes
+PCoA1_x_LibSize_plot<-
+ggplot(filtered_permavonas, 
+       aes(x = PCoA_1,y = log(Library_size), color =R2_Sp_x_Stress, alpha = 0.8))+
+     geom_point()+
+     #facet_wrap(~Stress)+
+  stat_cor(method = "pearson",
+           p.accuracy = 0.001, 
+           r.accuracy = 0.01,
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")),
+           color = "Black")+
+  geom_smooth(method = "lm",
+              formula = y ~ x,
+              colour = "Black" )  +
+  xlab("% var. explained in PCoA_1")+
+  ylab("log Library size (unnormalized counts)")+
+  scale_color_viridis()+
+  facet_wrap(~taxonomic_rank, nrow =1)
+
+#PCoA2 VS library sizes
+PCoA2_x_LibSize_plot<-
+ggplot(filtered_permavonas, 
+       aes(x = PCoA_2,y = log(Library_size), color =R2_Sp_x_Stress, alpha = 0.8))+
+     geom_point()+
+     #facet_wrap(~Stress)+
+  stat_cor(method = "pearson",
+           p.accuracy = 0.001, 
+           r.accuracy = 0.01,
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")),
+           color = "Black")+
+  geom_smooth(method = "lm",
+              formula = y ~ x,
+              colour = "Black" )  +
+  xlab("% var. explained in PCoA_2")+
+  ylab("log Library size (unnormalized counts)")+
+  scale_color_viridis()+
+  facet_wrap(~taxonomic_rank, nrow =1)
+
+
+R2_sp_x_R2_block_plot<-
+ggplot(filtered_permavonas, 
+       aes(x = R2_Sp_full_name,y = R2_Block, color =R2_Sp_x_Stress, alpha = 0.8))+
+     geom_point()+
+     #facet_wrap(~Stress)+
+  stat_cor(method = "pearson",
+           p.accuracy = 0.001, 
+           r.accuracy = 0.01,
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")),
+           color = "Black")+
+  geom_smooth(method = "lm",
+              formula = y ~ x,
+              colour = "Black" )  +
+  xlab("R2 Plant Sp.")+
+  ylab("R2 Block")+
+  scale_color_viridis()+
+  facet_wrap(~taxonomic_rank, nrow =1)
+
+
+
+R2_spXstress_x_R2_block_plot<-
+ggplot(filtered_permavonas, 
+       aes(x = R2_Sp_x_Stress ,y = R2_Block, color =R2_Sp_x_Stress, alpha = 0.8))+
+     geom_point()+
+     #facet_wrap(~Stress)+
+  stat_cor(method = "pearson",
+           p.accuracy = 0.001, 
+           r.accuracy = 0.01,
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")),
+           color = "Black")+
+  geom_smooth(method = "lm",
+              formula = y ~ x,
+              colour = "Black" )+
+  xlab("R2 Sp*Stress")+
+  ylab("R2 Block")+
+  scale_color_viridis()+
+  facet_wrap(~taxonomic_rank, nrow =1)
+
+
+
+
+
+
+
+```
+
+## Panel of 34 permanvoa plots: PCA + R2
+```{r}
+#arrange plot
+panel_34_permanovas<-
+ggarrange(pca_plot_34_Permanovas,
+          ggarrange(pinteract_x_LibSize_plot,
+                    PCoA1_x_LibSize_plot,
+                    PCoA2_x_LibSize_plot,
+                    R2_sp_x_R2_block_plot,
+                    R2_spXstress_x_R2_block_plot,
+                    ncol = 1, 
+                    common.legend = TRUE, 
+                    legend = "bottom"),
+          ncol = 2, 
+          widths = c(1,2))
+
+#save plot
+ggsave(filename = "./14_Phylogenetic_distance/results/Results_April2023/panel_34_permanovas.svg",
+       plot = panel_34_permanovas,
+       width = 400, 
+       height = 350, 
+       units = "mm")
+
+
+```
+
+
+
+
+
+# ------
+# --- Fungi --- 
+# ------
+
+
+# load processed R objects, FUN
+```{r}
+
+
+# load output of pipeline, Fun 
+load(file ="./14_Phylogenetic_distance/r_objects/fun_alltaxa_phylosig_PCoA_nonsig.RData")
+
+#load hundred of permanovas calculated on the HPC (output of permanova_per_taxonomic_group)
+load(file = "./14_Phylogenetic_distance/r_objects/permanovas_spXstress_70.RData") 
+
+# load hundreds of PCoA plots
+load(file = "./14_Phylogenetic_distance/r_objects/PCoA_Fun_70_plots_axis_pct.RData") # one per tax group
+load(file = "./14_Phylogenetic_distance/r_objects/PCoA_Fun_70_3x_plots_axis_pct.RData") # one per tax group and per stress
+
+# load ps objects with overwrriten library size per taxonomic group (from 11h_library_size_on_phylosig.Rmd)
+load(file = "./14_Phylogenetic_distance/r_objects/Fun_ps_taxa_l_overwrittenLibSize_ps_l.RData")
+
+#load output of mantel pipeline 
+load(file = "./14_Phylogenetic_distance/r_objects/fun_alltaxa_mantel_pipeline_df.RData") #df
+load(file = "./14_Phylogenetic_distance/r_objects/fun_alltaxa_mantel_pipeline_bray_correlation_plot.RData") #plots
+
+
+
+```
+
+
+# - 
+# Prepare a df of results from 70 Permanovas + PCoAs
+
+
+## extract p/r valeus from 70 permanovas, set base df
+```{r}
+
+
+#extract r/p values
+perm_70_df<-
+permanova_output_to_plot_input2(permanova_output_l = permanovas_spXstress_70$permanova_l)
+
+
+# put % explained variaance per PC in a df
+axis_pct_tax_group<-
+  PCoA_plot_l_to_pct_variance_df(PCoA_Fun_70_plots_axis_pct)
+
+axis_pct_tax_group_Control<-
+  PCoA_plot_l_to_pct_variance_df(PCoA_Fun_70_3x_plots_axis_pct[1:3])
+names(axis_pct_tax_group_Control)[2:3]<-paste0(names(axis_pct_tax_group_Control)[2:3], "_Control_only")
+
+axis_pct_tax_group_MeJA<-
+  PCoA_plot_l_to_pct_variance_df(PCoA_Fun_70_3x_plots_axis_pct[4:6])
+names(axis_pct_tax_group_MeJA)[2:3]<-paste0(names(axis_pct_tax_group_MeJA)[2:3], "_MeJA_only")
+
+axis_pct_tax_group_SA<-
+  PCoA_plot_l_to_pct_variance_df(PCoA_Fun_70_3x_plots_axis_pct[7:9])
+names(axis_pct_tax_group_SA)[2:3]<-paste0(names(axis_pct_tax_group_SA)[2:3], "_SA_only")
+
+#put 70 PCoAs from the 3 stresses into 1 df
+axis_pct_tax_group_per_stress<-
+  cbind(axis_pct_tax_group_Control, axis_pct_tax_group_MeJA[,2:3], axis_pct_tax_group_SA[,2:3])
+
+
+# widen the df
+perm_70_df_wide<-
+pivot_wider(data = perm_70_df,
+            names_from = factor,
+            values_from = c("pvalue", "R2"))
+
+# widen phylosig df
+df_phylosig_wide<-
+pivot_wider(data = fun_alltaxa_phylosig_PCoA_nonsig$df_phylosig, 
+            names_from = c("stress", "higher_lower_PC"),
+            values_from = c("trait", "value", "pvalue", "pvalue_adjust"))
+
+# remove unecessary info (phylosig test used, phylosig test adjsuted p)
+df_phylosig_wide<-
+  df_phylosig_wide[,-c(2, 21:26)]
+
+
+#join 70 permanovas to widened df-phylosig
+perm_70_phylosig_df_wide<-
+  left_join(perm_70_df_wide, df_phylosig_wide, by = c("taxonomic_group" = "column_label"))
+
+#add % explained varaince
+perm_70_phylosig_pct_df<-
+  left_join(perm_70_phylosig_df_wide, axis_pct_tax_group)
+
+perm_70_phylosig_pct_df<-
+  left_join(perm_70_phylosig_pct_df, axis_pct_tax_group_per_stress)
+
+
+
+```
+
+## Add library sizes to DF of 70 PERMANOVAS + PCoA
+these updated library sizes objects were generated in script 11h_library_size_on_phylosig.Rmd
+```{r}
+
+#add library size (all 3 stresses together; that is the PERMANOVA input) to into a df 
+libSizes<-
+  lapply(ps_taxa_l_overwrittenLibSize_fun, function(x) sum(x@sam_data$library_size))
+
+libSizes_df<-
+  as.data.frame(do.call("rbind", libSizes))%>%rownames_to_column()
+
+names(libSizes_df)<-c("taxonomic_group", "Library_size")
+
+#join with rest of 70 permanova df
+perm_70_phylosig_pct_df<-
+  left_join(perm_70_phylosig_pct_df, libSizes_df)
+
+#add library size under each stress condition(split by taxonomic gorupto df 
+libSizes_per_stress<-
+  lapply(ps_taxa_l_overwrittenLibSize_fun, function(x) {
+    ps_per_stress<-phyloseq_sep_variable(x, var = "Stress")
+      output<-lapply(ps_per_stress, function(z)
+       sum(z@sam_data$library_size)) 
+    return(output)
+    })
+
+libSizes_per_stress<-
+  lapply(libSizes_per_stress, function(x) 
+    unlist(x))
+
+# put library sizes epr stress into a df
+libSizes_per_stress_df<-
+  as.data.frame(do.call("rbind", libSizes_per_stress))%>%rownames_to_column()
+
+names(libSizes_per_stress_df)<-c("taxonomic_group", 
+                                  "Library_size_Control", 
+                                  "Library_size_MeJA", 
+                                  "Library_size_SA")
+
+#join with rest of 70 permanova df
+perm_70_phylosig_pct_df<-
+  left_join(perm_70_phylosig_pct_df, libSizes_per_stress_df)
+
+# add column to define taxonomic rank
+perm_70_phylosig_pct_df$taxonomic_rank<-
+  factor(
+        c(
+           gsub(x = perm_70_phylosig_pct_df$taxonomic_group, pattern = "k__.*$",replacement = "Kingdom")%>%
+           gsub(pattern = "p__.*$",replacement = "Phylum")%>%
+           gsub(pattern = "o__.*$",replacement = "Order")%>%
+           gsub(pattern = "c__.*$",replacement = "Class")%>%
+           gsub(pattern = "f__.*$",replacement = "Family")%>%
+           gsub(pattern = "g__.*$",replacement = "Genus")),
+         levels = c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus"))
+
+# define unexplained permanova variance
+perm_70_phylosig_pct_df$residual_permanova<-
+  1 - (perm_70_phylosig_pct_df$R2_Block +
+          perm_70_phylosig_pct_df$R2_Sp_full_name +
+          perm_70_phylosig_pct_df$R2_Sp_x_Stress + 
+          perm_70_phylosig_pct_df$R2_Stress)
+
+# define PCoA_1/ PCoA2 varaince aexplained ratio
+perm_70_phylosig_pct_df$var_explined_ratio<-
+  (perm_70_phylosig_pct_df$PCoA_1/perm_70_phylosig_pct_df$PCoA_2)
+
+
+
+```
+
+
+
+## define distance to centroids for the 3 experimental factors (Block, plant_sp, Stress)
+```{r}
+
+#define function to wrangle beta dispersion data
+get_beta_disper_comparison<-function(Taxonomic_group_beta_disper){
+  
+dist_to_centroid_df<-
+  as.data.frame(Taxonomic_group_beta_disper$beta_disper_block$distances)
+
+names(dist_to_centroid_df)<-"distance_to_centroid"
+dist_to_centroid_df<-rownames_to_column(dist_to_centroid_df, var = "sample_name")
+dist_to_centroid_df$centroid_group<-"Block"
+dist_to_centroid_df$group_ID<-Taxonomic_group_beta_disper$beta_disper_block$group
+
+
+dist_to_centroid_df2<-
+  as.data.frame(Taxonomic_group_beta_disper$beta_disper_sp$distances)
+
+names(dist_to_centroid_df2)<-"distance_to_centroid"
+dist_to_centroid_df2<-rownames_to_column(dist_to_centroid_df2, var = "sample_name")
+dist_to_centroid_df2$centroid_group<-"plant_Sp"
+dist_to_centroid_df2$group_ID<-Taxonomic_group_beta_disper$beta_disper_sp$group
+
+
+dist_to_centroid_df3<-
+  as.data.frame(Taxonomic_group_beta_disper$beta_disper_stress$distances)
+
+names(dist_to_centroid_df3)<-"distance_to_centroid"
+dist_to_centroid_df3<-rownames_to_column(dist_to_centroid_df3, var = "sample_name")
+dist_to_centroid_df3$centroid_group<-"Stress"
+dist_to_centroid_df3$group_ID<-Taxonomic_group_beta_disper$beta_disper_stress$group
+
+
+dist_to_centroid_df<-
+  rbind(dist_to_centroid_df,dist_to_centroid_df2,dist_to_centroid_df3)
+
+#print(ggplot(dist_to_centroid_df, aes(x = centroid_group, y = distance_to_centroid))+
+ # geom_boxplot())
+
+return(dist_to_centroid_df)
+}
+
+#execute custom function above, generating a list of dfs
+beta_disper_comparions_df_l<-lapply(permanovas_spXstress_70$beta_disper_l, function(z)
+  get_beta_disper_comparison(Taxonomic_group_beta_disper = z))
+
+#join list
+beta_disper_comparions_df<-
+  do.call("rbind", beta_disper_comparions_df_l)%>%rownames_to_column(var = "taxonomic_group")
+
+#adjsut names
+beta_disper_comparions_df$taxonomic_group<-
+  gsub(pattern = "\\..*",replacement = "", x = beta_disper_comparions_df$taxonomic_group)
+
+# add column to define taxonomic rank
+beta_disper_comparions_df$taxonomic_rank<-
+  factor(
+        c(
+           gsub(x = beta_disper_comparions_df$taxonomic_group, pattern = "k__.*$",replacement = "Kingdom")%>%
+           gsub(pattern = "p__.*$",replacement = "Phylum")%>%
+           gsub(pattern = "o__.*$",replacement = "Order")%>%
+           gsub(pattern = "c__.*$",replacement = "Class")%>%
+           gsub(pattern = "f__.*$",replacement = "Family")%>%
+           gsub(pattern = "g__.*$",replacement = "Genus")),
+         levels = c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus"))
+
+
+#check summary
+summarized_df_dist_to_centroid<-
+group_by(.data = beta_disper_comparions_df, centroid_group, taxonomic_group, taxonomic_rank)%>%
+  dplyr::summarize(mean_dist = mean(distance_to_centroid),
+            median_dist = median(distance_to_centroid),
+            sd_dist = sd(distance_to_centroid))
+
+
+```
+
+
+
+## define if beta distribution residuals are bimodal 
+to be kept in the analysis, a taoxnomic group must have a unimodal distribution in distance to centroids for stress, plant species AND block
+
+```{r}
+
+#split beta diversity comparisons into a nested list for lapply
+beta_disper_comparions_df_l<-
+  split(x = beta_disper_comparions_df, f = beta_disper_comparions_df$taxonomic_group)
+
+#run multimode test (takes several minutes to compute)
+multimode_test_l_output<-
+lapply(beta_disper_comparions_df_l, function(x){
+  
+  set.seed(12345)
+  Block_modtest<-modetest(dplyr::filter(x, centroid_group =="Block")$distance_to_centroid)
+    
+  plantSp_modtest<-modetest(dplyr::filter(x, centroid_group =="plant_Sp")$distance_to_centroid)
+  
+  Stress_modtest<-modetest(dplyr::filter(x, centroid_group =="Stress")$distance_to_centroid)
+  
+  output<-list("Block_modtest" = Block_modtest,
+               "plantSp_modtest" = plantSp_modtest,
+               "Stress_modtest" = Stress_modtest)
+  
+  return(output)
+  
+})
+
+
+
+#save externally
+save(multimode_test_l_output, file = "./14_Phylogenetic_distance/r_objects/fun_multimode_test_l_output.RData")
+load(file = "./14_Phylogenetic_distance/r_objects/fun_multimode_test_l_output.RData")
+
+
+```
+
+##  put multimode test results into a df, join with 70 permanova df
+```{r}
+#extract p values from the multimode test, put in lsit
+multimode_p_l<-
+lapply(multimode_test_l_output, function(x){
+  block_p_multimode<-x$Block_modtest$p.value
+  plantSp_p_multimode<-x$plantSp_modtest$p.value
+  Stress_p_multimode<-x$Stress_modtest$p.value
+  
+  return(c("block_p_multimode" = block_p_multimode,
+           "plantSp_p_multimode" = plantSp_p_multimode,
+           "Stress_p_multimode" = Stress_p_multimode))
+  
+})
+
+#turn list into df
+multimode_p_df<-
+  as.data.frame(do.call("rbind",multimode_p_l ))
+
+#define if residuals are unimodal in the experimental factors ( number of experiemntal factros where residues are unimodal)
+multimode_p_df$unimodal_residues<-rowCounts(multimode_p_df[,1:3]>0.05)
+multimode_p_df$unimodal_residues001<-rowCounts(multimode_p_df[,1:3]>0.01)
+
+
+
+#put the output of the beta dispersion unimodalisty testing in the permanova df
+multimode_p_df<-rownames_to_column(multimode_p_df, var = "taxonomic_group")
+perm_70_phylosig_pct_df<-left_join(perm_70_phylosig_pct_df,multimode_p_df)
+
+
+
+
+
+
+
+
+```
+
+
+
+## define if residual distributions are similar to control
+```{r}
+
+
+# run Kolmogorov-Smirnov to compare distribution of residuals with k__Fungi
+ks_l_output<-
+lapply(beta_disper_comparions_df_l, function(x){
+  # run Kolmogorov-Smirnov to define if two samples (k__Fungi and focal taxonomic group) derive from teh same distribution on a varaibles (scaled distances to centroids)
+  
+  ks_Block<-
+    ks.test(x = scale(dplyr::filter(beta_disper_comparions_df_l$k__Fungi, 
+                         centroid_group == "Block" )$distance_to_centroid),
+           y = scale(dplyr::filter(x, 
+                             centroid_group == "Block" )$distance_to_centroid))
+    
+  ks_Stress<-
+    ks.test(x = scale(dplyr::filter(beta_disper_comparions_df_l$k__Fungi, 
+                         centroid_group == "Stress" )$distance_to_centroid),
+           y = scale(dplyr::filter(x, 
+                             centroid_group == "Stress" )$distance_to_centroid))
+  
+   
+   ks_plantSp<-
+    ks.test(x = scale(dplyr::filter(beta_disper_comparions_df_l$k__Fungi, 
+                         centroid_group == "plant_Sp" )$distance_to_centroid),
+           y = scale(dplyr::filter(x, 
+                             centroid_group == "plant_Sp" )$distance_to_centroid))
+  
+  
+  output<-list("ks_Block" = ks_Block,
+               "ks_Stress" = ks_Stress,
+               "ks_plantSp" = ks_plantSp)
+  
+  return(output)
+  
+})
+
+#extract p values from the test, put in lsit
+ks_l_pval<-
+  lapply(ks_l_output, function(x){
+    
+  block_p_ks<-x$ks_Block$p.value
+  plantSp_p_ks<-x$ks_plantSp$p.value
+  Stress_p_ks<-x$ks_Stress$p.value
+  
+  return(c("block_p_ks" = block_p_ks,
+           "plantSp_p_ks" = plantSp_p_ks,
+           "Stress_p_ks" = Stress_p_ks))
+  
+})
+
+
+
+   
+   
+   
+
+#turn list into df
+ks_pval_df<-
+  as.data.frame(do.call("rbind",ks_l_pval ))
+
+#define if residuals are unimodal in all experimental factors (as in number of experiemntal factros)
+ks_pval_df$residue_dist_simialr_to_K__Fungi<-rowCounts(ks_pval_df[,1:3]>0.05)
+ks_pval_df$residue_dist_simialr_to_K__Fungi001<-rowCounts(ks_pval_df[,1:3]>0.01)
+
+#put the output of the beta dispersion unimodalisty testing in the permanova df
+ks_pval_df<-rownames_to_column(ks_pval_df, var = "taxonomic_group")
+perm_70_phylosig_pct_df<-left_join(perm_70_phylosig_pct_df,ks_pval_df)
+
+
+
+```
+
+
+
+## reshape mantel pipeline output to fit permanova df
+```{r}
+
+# remove Jaccard distances, as they provide the same conclusions as bray-curtis
+fun_alltaxa_mantel_pipeline_df_reshaped<-
+  dplyr::filter(fun_alltaxa_mantel_pipeline_df, distance =="Bray")
+
+#remove column that identifies if  the test ws significant
+fun_alltaxa_mantel_pipeline_df_reshaped<-
+  dplyr::select(fun_alltaxa_mantel_pipeline_df_reshaped,  -significant)
+
+# rename some variable to avoid confusion wiht abouheif tests
+names(fun_alltaxa_mantel_pipeline_df_reshaped)[c(3,5)]<-c("distance_Mantel", "p_value_Mantel")
+
+#widen df to have one row per taxonomic group
+fun_alltaxa_mantel_pipeline_df_reshaped<-
+  pivot_wider(fun_alltaxa_mantel_pipeline_df_reshaped, 
+              names_from = "Treatment", 
+              values_from = c("r2_Mantel", "p_value_Mantel"))
+
+
+
+```
+
+
+
+## add mantel pipeline outut to permanova df
+```{r}
+
+perm_70_phylosig_pct_df<-
+  left_join(perm_70_phylosig_pct_df,fun_alltaxa_mantel_pipeline_df_reshaped)
+
+```
+
+## define PCoA variance explained by the PC with highest abouheif
+```{r}
+#re-arrange which is the hgiehr PC
+perm_70_phylosig_pct_df$higher_PC_Control<-
+  gsub(x = perm_70_phylosig_pct_df$trait_Control_Higher_PC, pattern = "_[a-z]_.*", replacement = "")
+
+perm_70_phylosig_pct_df$higher_PC_MeJA<-
+  gsub(x = perm_70_phylosig_pct_df$trait_MeJA_Higher_PC, pattern = "_[a-z]_.*", replacement = "")
+
+perm_70_phylosig_pct_df$higher_PC_SA<-
+  gsub(x = perm_70_phylosig_pct_df$trait_SA_Higher_PC, pattern = "_[a-z]_.*", replacement = "")
+
+# define PCoA_1/ PCoA2 varaince aexplained ratio
+perm_70_phylosig_pct_df$var_explined_ratio_Control<-
+  (perm_70_phylosig_pct_df$PCoA_1_Control_only/perm_70_phylosig_pct_df$PCoA_2_Control_only)
+
+perm_70_phylosig_pct_df$var_explined_ratio_MeJA<-
+  (perm_70_phylosig_pct_df$PCoA_1_MeJA_only/perm_70_phylosig_pct_df$PCoA_2_MeJA_only)
+
+perm_70_phylosig_pct_df$var_explined_ratio_SA<-
+  (perm_70_phylosig_pct_df$PCoA_1_SA_only/perm_70_phylosig_pct_df$PCoA_2_SA_only)
+
+# assing the abouheif value for each PCoA in each treatmet condition, (hard-coded)
+perm_70_phylosig_pct_df$PCoA_1_Control_abouheif_value<-
+  ifelse(test = perm_70_phylosig_pct_df$higher_PC_Control == "PCoA_1",
+         yes = perm_70_phylosig_pct_df$value_Control_Higher_PC,
+         no = perm_70_phylosig_pct_df$value_Control_Lower_PC)
+
+perm_70_phylosig_pct_df$PCoA_2_Control_abouheif_value<-
+  ifelse(test = perm_70_phylosig_pct_df$higher_PC_Control == "PCoA_2",
+         yes = perm_70_phylosig_pct_df$value_Control_Higher_PC,
+         no = perm_70_phylosig_pct_df$value_Control_Lower_PC)
+
+perm_70_phylosig_pct_df$PCoA_1_MeJA_abouheif_value<-
+  ifelse(test = perm_70_phylosig_pct_df$higher_PC_MeJA == "PCoA_1",
+         yes = perm_70_phylosig_pct_df$value_MeJA_Higher_PC,
+         no = perm_70_phylosig_pct_df$value_MeJA_Lower_PC)
+
+perm_70_phylosig_pct_df$PCoA_2_MeJA_abouheif_value<-
+  ifelse(test = perm_70_phylosig_pct_df$higher_PC_MeJA == "PCoA_2",
+         yes = perm_70_phylosig_pct_df$value_MeJA_Higher_PC,
+         no = perm_70_phylosig_pct_df$value_MeJA_Lower_PC)
+
+perm_70_phylosig_pct_df$PCoA_1_SA_abouheif_value<-
+  ifelse(test = perm_70_phylosig_pct_df$higher_PC_SA == "PCoA_1",
+         yes = perm_70_phylosig_pct_df$value_SA_Higher_PC,
+         no = perm_70_phylosig_pct_df$value_SA_Lower_PC)
+
+perm_70_phylosig_pct_df$PCoA_2_SA_abouheif_value<-
+  ifelse(test = perm_70_phylosig_pct_df$higher_PC_SA == "PCoA_2",
+         yes = perm_70_phylosig_pct_df$value_SA_Higher_PC,
+         no = perm_70_phylosig_pct_df$value_SA_Lower_PC)
+
+# assing the % PCoA explained in the PCoA wth higer abouheif
+perm_70_phylosig_pct_df$higher_PC_Control_pct<-
+  ifelse(test = perm_70_phylosig_pct_df$higher_PC_Control == "PCoA_1",
+         yes = perm_70_phylosig_pct_df$PCoA_1_Control_only,
+         no = perm_70_phylosig_pct_df$PCoA_2_Control_only)
+
+perm_70_phylosig_pct_df$lower_PC_Control_pct<-
+  ifelse(test = perm_70_phylosig_pct_df$higher_PC_Control == "PCoA_2",
+         yes = perm_70_phylosig_pct_df$PCoA_1_Control_only,
+         no = perm_70_phylosig_pct_df$PCoA_2_Control_only)
+
+perm_70_phylosig_pct_df$higher_PC_MeJA_pct<-
+  ifelse(test = perm_70_phylosig_pct_df$higher_PC_MeJA == "PCoA_1",
+         yes = perm_70_phylosig_pct_df$PCoA_1_MeJA_only,
+         no = perm_70_phylosig_pct_df$PCoA_2_MeJA_only)
+
+perm_70_phylosig_pct_df$lower_PC_MeJA_pct<-
+  ifelse(test = perm_70_phylosig_pct_df$higher_PC_MeJA == "PCoA_2",
+         yes = perm_70_phylosig_pct_df$PCoA_1_MeJA_only,
+         no = perm_70_phylosig_pct_df$PCoA_2_MeJA_only)
+          
+perm_70_phylosig_pct_df$higher_PC_SA_pct<-
+  ifelse(test = perm_70_phylosig_pct_df$higher_PC_SA == "PCoA_1",
+         yes = perm_70_phylosig_pct_df$PCoA_1_SA_only,
+         no = perm_70_phylosig_pct_df$PCoA_2_SA_only)
+
+perm_70_phylosig_pct_df$lower_PC_SA_pct<-
+  ifelse(test = perm_70_phylosig_pct_df$higher_PC_SA == "PCoA_2",
+         yes = perm_70_phylosig_pct_df$PCoA_1_SA_only,
+         no = perm_70_phylosig_pct_df$PCoA_2_SA_only)
+
+```
+
+
+
+### save processed 70 PERMANOVAS df
+
+```{r}
+# save df of 70 permanovas, % variance, Abouheif values, beta dispersion results
+save(perm_70_phylosig_pct_df, file = "./14_Phylogenetic_distance/r_objects/perm_70_phylosig_pct_df.RData")
+load(file = "./14_Phylogenetic_distance/r_objects/perm_70_phylosig_pct_df.RData")
+view(perm_70_phylosig_pct_df)
+```
+
+
+# check mantel pairwise correlations of fungi
+```{r}
+
+
+
+#export example mantel plot pariiwise comparisons among samples
+ggsave(ggarrange(fun_alltaxa_mantel_pipeline_bray_correlation_plot$k__Fungi,
+                 fun_alltaxa_mantel_pipeline_bray_correlation_plot$c__Sordariomycetes,
+                 fun_alltaxa_mantel_pipeline_bray_correlation_plot$o__Hypocreales,
+                 ncol = 3),
+       width = 450,
+       height = 350,
+       units = "mm",
+       filename = "./14_Phylogenetic_distance/results/Results_April2023/mantel_pairwise_Fungi.pdf",)
+
+```
+
+
+```
+

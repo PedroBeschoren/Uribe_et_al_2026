@@ -1,0 +1,23 @@
+#!/bin/bash -login
+
+#SBATCH --time=24:00:00                                        ### limit of wall clock time - how long the job will run (same as -t)
+#SBATCH --ntasks=1                                            ### number of tasks - how many tasks (nodes) that you require (same as -n)
+#SBATCH --cpus-per-task=8                        ### number of CPUs (or cores) per task (same as -c)
+#SBATCH --mem=328G                                              ### memory required per node - amount of memory (in bytes)
+#SBATCH --job-name CV_boruta                    ### you can give your job a name for easier identification (same as -J)
+#SBATCH --output="CV_boruta400k_replicated25_SA_33sp_%j.out"              ### name of the output file
+
+# unload gcc and R, which were giving errors when laoding R and R packages
+module unload gcc
+module unload R/4.1.2
+
+
+# make R available to your fresh enviroment
+module load R/4.1.2
+
+# start running R
+Rscript CV_boruta400k_replicated25_SA_33sp.R --save
+
+# clean session
+module unload R/4.1.2
+

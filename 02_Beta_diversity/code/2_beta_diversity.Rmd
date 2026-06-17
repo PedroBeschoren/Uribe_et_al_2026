@@ -1,0 +1,1016 @@
+---
+title: "2_beta_diversity_CLEAN"
+author: "Zulema Carracedo Lorenzo"
+date: "March 31, 2023"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+## Load libraries
+
+```{r}
+#Load libraries
+library(phyloseq)
+library(microbiome)
+library(vegan)
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+library(ggpubr)
+library(tibble)
+library(car)
+library(purrr)
+library(umap) 
+library(vegan)
+library(spaa)
+library(EcolUtils)
+library(pairwiseAdonis)
+```
+
+
+## Load the full data
+
+You will likely only need one type of normalization for the analysis tool you are using
+
+```{r results="hide"}
+# this will load the CSS-normalized 16S and ITS data as a list of two objects
+load("./data/phyloseq_objects/CSS_BacFun_rhizoplane_HighFilt_ps_l.RData")
+
+#Subset for the Brassica species that are included in the phylogenetic tree
+CSS_BacFun_tree_l <- lapply(CSS_BacFun_rhizoplane_HighFilt_ps_l, function(x) 
+                      subset_samples(x, MY_tree_presence == "inside_MY_tree"))
+  
+CSS_BacFun_tree_l <- lapply(CSS_BacFun_tree_l, function(x) prune_taxa(taxa_sums(x) >0,x)) #we need to prune the ASV that are not present in the subset
+
+#Now we can remove the original phyloseq object
+rm(CSS_BacFun_rhizoplane_HighFilt_ps_l)
+
+phylogeny_vector <- c("Arabidopsis_thaliana", "Arabidopsis_lyrata", "Camelina_sativa", "Turritis_glabra","Erysium_cheirantoides","Malcomia_maritima", "Barbarea_vulgaris","Lepidium_ruderale", "Descurainia_sophiades", "Brassica_nigra", "Sinapis_arvensis", "Hirschfeldia_incana", "Brassica_rapa",  "Brassica_oleraceae_Rivera_Medium", "Diplotaxis_tenuifolia", "Sysimbrium_irio", "Isatis_tinctoria", "Cochlearia_officinalis", "Lobularia_maritima", "Iberis_amara", "Berteroa_incana", "Euclydium_syriacum") #needed for the plots
+
+# add extended lineage as metadata
+ 
+   CSS_BacFun_tree_l<- lapply(CSS_BacFun_tree_l, function(x){
+
+  x@sam_data$Sp_Lineage_Walden_extended<-
+    if_else(condition = x@sam_data$Sp_abb_name %in% c("Ia", "Lm", "Co", "Bi"), 
+            true ="lineage_II_extended",
+            false =  x@sam_data$Sp_Lineage_Walden)
+
+    return(x)
+
+  })  
+
+# add supertribe informationa as metadara 
+   
+supertribe <- read.csv("./16_Plant_species_information/data/df_full_sp_info_clean.csv") #dataframe with supertribe info
+
+#keep only the information needed
+supertribe <- supertribe %>% select(Sp_abb_name, SuperTribe, Color_HEX)
+
+# extract the current sample data
+metadata_l <- list(Bac=(data.frame(CSS_BacFun_tree_l$Bac@sam_data)),           Fun=(data.frame(CSS_BacFun_tree_l$Fun@sam_data))) #list with dataframes from currecnt original sample data phyloseq for Bac and fun
+
+#Merge both dataframes
+
+merged_sample_data_l <- lapply(metadata_l, function(x){
+
+  merge(
+    x,
+    supertribe,
+  by = "Sp_abb_name",  # Adjust the column name as needed
+  all.x = TRUE)  # Keeps all rows from the current_sample_data
+  })  
+
+
+# Set rownames back to sample IDs
+
+merged_sample_data_l$Bac$Harvest_ID_2 <- paste(merged_sample_data_l$Bac$Harvest_ID, merged_sample_data_l$Bac$Target, sep = "_")
+
+merged_sample_data_l$Fun$Harvest_ID_2 <- paste(merged_sample_data_l$Fun$Harvest_ID, merged_sample_data_l$Fun$Target, sep = "_")
+
+rownames(merged_sample_data_l$Bac) <- merged_sample_data_l$Bac$Harvest_ID_2
+rownames(merged_sample_data_l$Fun) <- merged_sample_data_l$Fun$Harvest_ID_2
+
+# Update the phyloseq object
+sample_data(CSS_BacFun_tree_l$Bac) <- sample_data(merged_sample_data_l$Bac)
+sample_data(CSS_BacFun_tree_l$Fun) <- sample_data(merged_sample_data_l$Fun)
+
+# Verify
+sample_data(CSS_BacFun_tree_l$Bac)
+sample_data(CSS_BacFun_tree_l$Fun)
+
+```
+
+## X.03 Subsets of data needed for the script
+
+```{r}
+CSS_Stress_ps_l <- lapply(CSS_BacFun_tree_l, function (x) 
+  metagMisc::phyloseq_sep_variable(x, variable = "Stress")) #divides the phyloseq object according to the treatment (stress). We get a list of 2 objects (bacteria and fungi) each of the with 3 objects (3 stresses)
+
+CSS_species_ps_l <- lapply(CSS_BacFun_tree_l, function (x) 
+  metagMisc::phyloseq_sep_variable(x, variable = "Sp_full_name")) #divides the phyloseq object according to the treatment (stress). We get a list of 2 objects (bacteria and fungi) each of the with 3 objects (3 stresses)
+
+CSS_Bac_ps <- CSS_BacFun_tree_l$Bac #only 16S samples
+
+CSS_Fun_ps <- CSS_BacFun_tree_l$Fun #only ITS samples
+
+
+```
+
+
+# 2.1. Beta diversity plots
+
+### 2.1.1. UMAP (Suplementary figure 6 C and D)
+
+```{r}
+
+# First transpose OTU table so that rows are samples and OTUs columns 
+
+otu_table_BacFun_tree_l <- lapply(CSS_BacFun_tree_l, function(x)
+                                t(otu_table(x)))
+
+# Calculate dissimilarity indexes with bray curtis method 
+
+bray_l <- lapply(otu_table_BacFun_tree_l, function (x)
+    vegdist(x, method = "bray"))
+
+bray_matrix_l <- lapply(bray_l, function (x)
+    as.matrix(x))
+
+# Run UMAP on bray curtis dissimilarity matrix
+
+UMAP_bray_l <- lapply(bray_matrix_l, function (x)
+      umap(x))
+
+save(UMAP_bray_l, file = "./02_Beta_Diversity/r_objects/UMAP_bray_l.RData")
+#load(file = "./02_Beta_Diversity/r_objects/UMAP_bray_l.RData")
+
+head(UMAP_bray_l$Bac$layout, 3) #layout is the matrix in which we are interested
+
+# Extract UMAP axis to test for phylogenetic signal
+
+UMAP_axis_Bac <- UMAP_bray_l$Bac$layout
+UMAP_axis_Fun <- UMAP_bray_l$Fun$layout
+
+save(UMAP_axis_Bac, file = "./02_Beta_Diversity/r_objects/UMAP_axis_Bac.RData")
+#load(file = "./02_Beta_Diversity/r_objects/Final_paper/UMAP_axis_Bac.RData")
+
+save(UMAP_axis_Fun, file = "./02_Beta_Diversity/r_objects/UMAP_axis_Fun.RData")
+#load(file = "./02_Beta_Diversity/r_objects/Final_paper/UMAP_axis_Fun.RData")
+
+# plot umap
+
+layoutBray <- lapply(UMAP_bray_l, function (x)
+      as.data.frame(x$layout))
+
+colnames(layoutBray$Bac) <-  c("UMAP1","UMAP2")
+colnames(layoutBray$Fun) <-  c("UMAP1","UMAP2")
+
+
+umap_meta_bac <- cbind(layoutBray$Bac, sample_data(CSS_BacFun_tree_l$Bac))
+umap_meta_fun <- cbind(layoutBray$Fun, sample_data(CSS_BacFun_tree_l$Fun))
+
+# we calculate centroids per species/treatment combination by averaging X and Y coordinates of all samples from that species/treatment
+
+# group by species/treatment and calculate average UMAP1 and UMAP2 coordinates
+
+
+umap_df_avarage_funtion <- function(x){
+
+  umap_df_average <- x %>%
+
+    group_by(Sp_abb_name2, Stress, Sp_Lineage_Walden_extended) %>%
+
+    summarise(UMAP1 = mean(UMAP1), UMAP2 = mean(UMAP2))
+
+  return(umap_df_average)
+
+}
+
+
+#For bacteria (Supplementary Figure 6-C)
+
+umap_meta_bac <- umap_meta_bac %>%
+                                        mutate(Sp_abb_name2 = 
+                                        case_when(Sp_abb_name  == "Bo_M" ~ "Bo",
+                                        TRUE ~ Sp_abb_name)) #rename Bo_M to Bo for the plots
+  
+umap_df_avarage_Bac <-  umap_df_avarage_funtion(umap_meta_bac) 
+colnames(umap_df_avarage_Bac) <- c('Sp_abb_name2', 'Treatment', 'Sp_Lineage_Walden_extended', 'UMAP1', 'UMAP2') #rename "stress" to "treatment"
+
+
+UMAP_plot_centroids_stress2_Bac <-ggplot(umap_df_avarage_Bac, aes(x=UMAP1,y=UMAP2, color=Treatment)) +
+   scale_color_manual(values=c('#999999','#E69F00', '#009E73'))+
+    ggtitle("UMAP - Bacteria") +
+    geom_text(aes(label = Sp_abb_name2), size=12) +
+    theme_bw() + 
+    theme(text = element_text(size = 20)) 
+
+  ggsave("UMAP_plot_centroids_stress_Bac.pdf", path = "./02_Beta_Diversity/results",
+         width = 30, height = 20, units = "cm")
+    ggsave("UMAP_plot_centroids_Bac.png", path = "./02_Beta_Diversity/results",
+         width = 30, height = 20, units = "cm")
+
+ 
+ #For fungi (Supplementary Figure 6-D)
+umap_meta_fun <- umap_meta_fun %>%
+                                        mutate(Sp_abb_name2 = 
+                                        case_when(Sp_abb_name  == "Bo_M" ~ "Bo",
+                                        TRUE ~ Sp_abb_name)) #rename Bo_M to Bo for the plots  
+  
+umap_df_avarage_Fun <-  umap_df_avarage_funtion(umap_meta_fun) 
+colnames(umap_df_avarage_Fun) <- c('Sp_abb_name2', 'Treatment', 'Sp_Lineage_Walden_extended', 'UMAP1', 'UMAP2') #rename" stress " to "treatment"
+
+  UMAP_plot_centroids_stress2_Fun <-ggplot(umap_df_avarage_Fun, aes(x=UMAP1,y=UMAP2, color=Treatment)) +
+   scale_color_manual(values=c('#999999','#E69F00', '#009E73'))+
+    ggtitle("UMAP - Fungi") +
+    geom_text(aes(label = Sp_abb_name2), size=12) +
+    theme_bw() + 
+    theme(text = element_text(size = 20)) 
+
+  ggsave("UMAP_plot_centroids_stress_Fun.pdf", path = "./02_Beta_Diversity/results",
+         width = 30, height = 20, units = "cm")
+   ggsave("UMAP_plot_centroids_stress_Fun.png", path = "./02_Beta_Diversity/results",
+         width = 30, height = 20, units = "cm")
+
+```
+
+
+### 2.1.2. PCoA per supertribe (Figure 1 and Supplementary Figure S8 A, B, C, D E, F)
+
+```{r}
+
+# calculate PCoA ordination per stress
+
+CSS_Stress_ps_l <- lapply(CSS_BacFun_tree_l, function (x) 
+  metagMisc::phyloseq_sep_variable(x, variable = "Stress")) #divides the phyloseq object according to the treatment (stress). We get a list of 2 objects (bacteria and fungi) each of the with 3 objects (3 stresses)
+
+
+  set.seed(300)
+  PCoA_stress_BacFun_l <- lapply(CSS_Stress_ps_l, function (list_of_two)
+    lapply(list_of_two, function (list_of_3)
+          ordinate(list_of_3,
+                   method="PCoA",
+                   distance="bray",
+                   try=200,
+                   autotransform=TRUE)))
+  
+save(PCoA_stress_BacFun_l, file = "./02_Beta_Diversity/r_objects/PCoA_stress_BacFun_l.RData")
+#load(file = "./02_Beta_Diversity/r_objects/PCoA_stress_BacFun_l.RData")
+
+#extract variance for plots
+  
+ # Percentage of variance explained
+variance_Bac_cntrl <- PCoA_stress_BacFun_l$Bac$Control$values$Relative_eig * 100
+variance_Bac_MeJA <- PCoA_stress_BacFun_l$Bac$MeJA$values$Relative_eig * 100
+variance_Bac_SA <- PCoA_stress_BacFun_l$Bac$SA$values$Relative_eig * 100
+
+variance_Fun_cntrl <- PCoA_stress_BacFun_l$Fun$Control$values$Relative_eig * 100
+variance_Fun_MeJA <- PCoA_stress_BacFun_l$Fun$MeJA$values$Relative_eig * 100
+variance_Fun_SA <- PCoA_stress_BacFun_l$Fun$SA$values$Relative_eig * 100 
+
+
+  ### Repeat so that we don't get the plots mirror ###
+  
+
+  set.seed(300)
+  PCoA_BacFun_l <- lapply(CSS_BacFun_tree_l, function (list_of_two)
+          ordinate(list_of_two,
+                   method="PCoA",
+                   distance="bray",
+                   try=200,
+                   autotransform=TRUE))
+  
+save(PCoA_BacFun_l, file = "./02_Beta_Diversity/r_objects/PCoA_BacFun_l.RData")
+#load(file = "./02_Beta_Diversity/r_objects/PCoA_BacFun_l.RData")
+
+# Coordinates of samples
+coordinates_Bac <- data.frame(PCoA_BacFun_l$Bac$vectors)
+colnames(coordinates_Bac)[1:2] <- c("PC1", "PC2")  # Adjust if using more axes
+
+coordinates_Fun <- data.frame(PCoA_BacFun_l$Fun$vectors)
+colnames(coordinates_Fun)[1:2] <- c("PC1", "PC2")  # Adjust if using more axes
+
+
+# Combine coordinates with metadata
+pcoa_data_Bac <- cbind(CSS_BacFun_tree_l$Bac@sam_data, coordinates_Bac)
+
+pcoa_data_Fun <- cbind(CSS_BacFun_tree_l$Fun@sam_data, coordinates_Fun)
+
+
+#ggplot
+
+# Create the PCoA plots
+colors <- c("Camelinodae_(I)"="#de70a8", #same colors as BrassiTol
+            "Arabodae_(IV)"="#9474e1",
+            "Hesperodae_(III)"="#5ab2eb",
+            "Brassicodae_(II)"="#10a072",
+            "Unplaced"="#e99c00",
+            "Heliophilodae_(V)"="#e05a00")
+
+
+  
+  # If I represent the centroids and merge it with the   individual samples?
+
+
+# divide by stress
+pcoa_data_Bac_cntrl <- filter(pcoa_data_Bac, Stress == "Control") #Bac control
+pcoa_data_Bac_MeJA <- filter(pcoa_data_Bac, Stress == "MeJA") #Bac MeJA
+pcoa_data_Bac_SA <- filter(pcoa_data_Bac, Stress == "SA") #Bac SA
+
+pcoa_data_Fun_cntrl <- filter(pcoa_data_Fun, Stress == "Control") #Fun control
+pcoa_data_Fun_MeJA <- filter(pcoa_data_Fun, Stress == "MeJA") #Fun MeJA
+pcoa_data_Fun_SA <- filter(pcoa_data_Fun, Stress == "SA") #Fun SA
+
+#calculate centroids  
+avg_pcoa_data_Bac_cntrl <- pcoa_data_Bac_cntrl %>% 
+                            group_by(Sp_abb_name) %>%
+                               summarise(mean_PC1 = mean(PC1), mean_PC2 = mean(PC2)) %>%
+                                mutate(Stress = "Control")
+  
+avg_pcoa_data_Bac_MeJA <- pcoa_data_Bac_MeJA %>% 
+                            group_by(Sp_abb_name) %>%
+                               summarise(mean_PC1 = mean(PC1), mean_PC2 = mean(PC2)) %>%
+                                mutate(Stress = "MeJA")
+
+avg_pcoa_data_Bac_SA <- pcoa_data_Bac_SA %>% 
+                            group_by(Sp_abb_name) %>%
+                               summarise(mean_PC1 = mean(PC1), mean_PC2 = mean(PC2))  %>%
+                                mutate(Stress = "SA")
+
+avg_pcoa_data_Fun_cntrl <- pcoa_data_Fun_cntrl %>% 
+                            group_by(Sp_abb_name) %>%
+                               summarise(mean_PC1 = mean(PC1), mean_PC2 = mean(PC2)) %>%
+                                mutate(Stress = "Control")
+  
+avg_pcoa_data_Fun_MeJA <- pcoa_data_Fun_MeJA %>% 
+                            group_by(Sp_abb_name) %>%
+                               summarise(mean_PC1 = mean(PC1), mean_PC2 = mean(PC2))  %>%
+                                mutate(Stress = "MeJA")
+
+avg_pcoa_data_Fun_SA <- pcoa_data_Fun_SA %>% 
+                            group_by(Sp_abb_name) %>%
+                               summarise(mean_PC1 = mean(PC1), mean_PC2 = mean(PC2))  %>%
+                                mutate(Stress = "SA")
+
+
+
+    # Bac control 
+
+pcoa_data_Bac_cntrl_2 <- merge(pcoa_data_Bac_cntrl, avg_pcoa_data_Bac_cntrl, by = "Sp_abb_name")
+
+# Replace "Lr" with "Lv" in the Sp_abb_name column
+pcoa_data_Bac_cntrl_2 <- pcoa_data_Bac_cntrl_2 %>%
+  mutate(Sp_abb_name = case_when(
+    Sp_abb_name == "Lr" ~ "Lv",  # Replace "Lr" with "Lv"
+    TRUE ~ Sp_abb_name           # Keep other values unchanged
+  ))
+
+# Replace "Bo_M" with "Bo" in the Sp_abb_name column
+pcoa_data_Bac_cntrl_2 <- pcoa_data_Bac_cntrl_2 %>%
+  mutate(Sp_abb_name = case_when(
+    Sp_abb_name == "Bo_M" ~ "Bo",  # Replace "Bo_M" with "Bo"
+    TRUE ~ Sp_abb_name           # Keep other values unchanged
+  ))
+# plot
+
+pcoa_data_Bac_cntrl_2$SuperTribe <- factor(pcoa_data_Bac_cntrl_2$SuperTribe, levels = c("Camelinodae_(I)", "Brassicodae_(II)", "Hesperodae_(III)", "Arabodae_(IV)", "Heliophilodae_(V)", "Unplaced"))
+
+p1 <- ggplot(pcoa_data_Bac_cntrl_2,aes(PC1,PC2,color=SuperTribe)) +
+  geom_point(size=2, alpha=0.3) + 
+  geom_text(data=pcoa_data_Bac_cntrl_2, aes(x=mean_PC1, y=mean_PC2,label= Sp_abb_name),size=10) +  
+  geom_segment(aes(x=mean_PC1, y=mean_PC2, xend=PC1, yend=PC2), alpha = 0.3) +
+  labs(
+    x = paste0("PC1 (", round(variance_Bac_cntrl[1], 2), "%)"),
+    y = paste0("PC2 (", round(variance_Bac_cntrl[2], 2), "%)"),
+    title = "PCoA 16S control"
+  ) +
+  scale_color_manual(values=colors)+
+    theme_bw() + 
+    theme(text = element_text(size = 25))
+
+ggsave("PCoA_SuperTribe_centroid_Bac_cntrl.png", path = "./02_Beta_Diversity/results",
+         width = 30, height = 20, units = "cm")
+ 
+  ggsave("PCoA_SuperTribe_centroid_Bac_cntrl.pdf", path = "./02_Beta_Diversity/results",
+         width = 30, height = 20, units = "cm")
+  
+
+  
+    # Bac MeJA 
+pcoa_data_Bac_MeJA_2 <- merge(pcoa_data_Bac_MeJA, avg_pcoa_data_Bac_MeJA, by = "Sp_abb_name")
+
+# Replace "Lr" with "Lv" in the Sp_abb_name column
+pcoa_data_Bac_MeJA_2 <- pcoa_data_Bac_MeJA_2 %>%
+  mutate(Sp_abb_name = case_when(
+    Sp_abb_name == "Lr" ~ "Lv",  # Replace "Lr" with "Lv"
+    TRUE ~ Sp_abb_name           # Keep other values unchanged
+  ))
+
+# Replace "Bo_M" with "Bo" in the Sp_abb_name column
+pcoa_data_Bac_MeJA_2 <- pcoa_data_Bac_MeJA_2 %>%
+  mutate(Sp_abb_name = case_when(
+    Sp_abb_name == "Bo_M" ~ "Bo",  # Replace "Bo_M" with "Bo"
+    TRUE ~ Sp_abb_name           # Keep other values unchanged
+  ))
+
+# plot
+pcoa_data_Bac_MeJA_2$SuperTribe <- factor(pcoa_data_Bac_MeJA_2$SuperTribe, levels = c("Camelinodae_(I)", "Brassicodae_(II)", "Hesperodae_(III)", "Arabodae_(IV)", "Heliophilodae_(V)", "Unplaced"))
+
+p2 <-ggplot(pcoa_data_Bac_MeJA_2,aes(PC1,PC2,color=SuperTribe)) +
+  geom_point(size=2, alpha=0.3) + 
+  geom_text(data=pcoa_data_Bac_MeJA_2, aes(x=mean_PC1, y=mean_PC2,label= Sp_abb_name),size=5) +  
+  geom_segment(aes(x=mean_PC1, y=mean_PC2, xend=PC1, yend=PC2), alpha = 0.3) +
+  labs(
+    x = paste0("PC1 (", round(variance_Bac_MeJA[1], 2), "%)"),
+    y = paste0("PC2 (", round(variance_Bac_MeJA[2], 2), "%)"),
+    title = "PCoA 16S MeJA"
+  ) +
+  scale_color_manual(values=colors)+
+    theme_bw() + 
+    theme(text = element_text(size = 20))
+
+ggsave("PCoA_SuperTribe_centroid_Bac_MeJA.png", path = "./02_Beta_Diversity/results",
+         width = 30, height = 20, units = "cm")
+ 
+  ggsave("PCoA_SuperTribe_centroid_Bac.pdf", path = "./02_Beta_Diversity/results",
+         width = 30, height = 20, units = "cm")    
+  
+
+      # Bac SA 
+pcoa_data_Bac_SA_2 <- merge(pcoa_data_Bac_SA, avg_pcoa_data_Bac_SA, by = "Sp_abb_name")
+
+# Replace "Lr" with "Lv" in the Sp_abb_name column
+pcoa_data_Bac_SA_2 <- pcoa_data_Bac_SA_2 %>%
+  mutate(Sp_abb_name = case_when(
+    Sp_abb_name == "Lr" ~ "Lv",  # Replace "Lr" with "Lv"
+    TRUE ~ Sp_abb_name           # Keep other values unchanged
+  ))
+
+# Replace "Bo_M" with "Bo" in the Sp_abb_name column
+pcoa_data_Bac_SA_2 <- pcoa_data_Bac_SA_2 %>%
+  mutate(Sp_abb_name = case_when(
+    Sp_abb_name == "Bo_M" ~ "Bo",  # Replace "Bo_M" with "Bo"
+    TRUE ~ Sp_abb_name           # Keep other values unchanged
+  ))
+
+# plot
+pcoa_data_Bac_SA_2$SuperTribe <- factor(pcoa_data_Bac_SA_2$SuperTribe, levels = c("Camelinodae_(I)", "Brassicodae_(II)", "Hesperodae_(III)", "Arabodae_(IV)", "Heliophilodae_(V)", "Unplaced"))
+
+p3 <- ggplot(pcoa_data_Bac_SA_2,aes(PC1,PC2,color=SuperTribe)) +
+  geom_point(size=2, alpha=0.3) + 
+  geom_text(data=pcoa_data_Bac_SA_2, aes(x=mean_PC1, y=mean_PC2,label= Sp_abb_name),size=10) +  
+  geom_segment(aes(x=mean_PC1, y=mean_PC2, xend=PC1, yend=PC2), alpha = 0.3) +
+  labs(
+    x = paste0("PC1 (", round(variance_Bac_SA[1], 2), "%)"),
+    y = paste0("PC2 (", round(variance_Bac_SA[2], 2), "%)"),
+    title = "PCoA 16S SA"
+  ) +
+  scale_color_manual(values=colors)+
+    theme_bw() + 
+    theme(text = element_text(size = 25))
+
+ggsave("PCoA_SuperTribe_centroid_Bac_SA.png", path = "./02_Beta_Diversity/results",
+         width = 30, height = 20, units = "cm")
+ 
+  ggsave("PCoA_SuperTribe_centroid_Bac_SA.pdf", path = "./02_Beta_Diversity/results",
+         width = 30, height = 20, units = "cm")    
+  
+   #Fun control
+  
+pcoa_data_Fun_cntrl_2 <- merge(pcoa_data_Fun_cntrl, avg_pcoa_data_Fun_cntrl, by = "Sp_abb_name")
+
+# Replace "Lr" with "Lv" in the Sp_abb_name column
+pcoa_data_Fun_cntrl_2 <- pcoa_data_Fun_cntrl_2 %>%
+  mutate(Sp_abb_name = case_when(
+    Sp_abb_name == "Lr" ~ "Lv",  # Replace "Lr" with "Lv"
+    TRUE ~ Sp_abb_name           # Keep other values unchanged
+  ))
+
+# Replace "Bo_M" with "Bo" in the Sp_abb_name column
+pcoa_data_Fun_cntrl_2 <- pcoa_data_Fun_cntrl_2 %>%
+  mutate(Sp_abb_name = case_when(
+    Sp_abb_name == "Bo_M" ~ "Bo",  # Replace "Bo_M" with "Bo"
+    TRUE ~ Sp_abb_name           # Keep other values unchanged
+  ))
+
+# plot  
+pcoa_data_Fun_cntrl_2$SuperTribe <- factor(pcoa_data_Fun_cntrl_2$SuperTribe, levels = c("Camelinodae_(I)", "Brassicodae_(II)", "Hesperodae_(III)", "Arabodae_(IV)", "Heliophilodae_(V)", "Unplaced"))
+
+p4 <- ggplot(pcoa_data_Fun_cntrl_2,aes(PC1,PC2,color=SuperTribe)) +
+  geom_point(size=2, alpha=0.3) + 
+  geom_text(data=pcoa_data_Fun_cntrl_2, aes(x=mean_PC1, y=mean_PC2,label= Sp_abb_name),size=5) +  
+  geom_segment(aes(x=mean_PC1, y=mean_PC2, xend=PC1, yend=PC2), alpha = 0.3) +
+  labs(
+    x = paste0("PC1 (", round(variance_Fun_cntrl[1], 2), "%)"),
+    y = paste0("PC2 (", round(variance_Fun_cntrl[2], 2), "%)"),
+    title = "PCoA ITS control"
+  ) +
+  scale_color_manual(values=colors)+
+    theme_bw() + 
+    theme(text = element_text(size = 20))
+
+ggsave("PCoA_SuperTribe_centroid_Fun_cntrl.png", path = "./02_Beta_Diversity/results",
+         width = 30, height = 20, units = "cm")
+ 
+  ggsave("PCoA_SuperTribe_centroid_Fun_cntrl.pdf", path = "./02_Beta_Diversity/results",
+         width = 30, height = 20, units = "cm")
+
+  
+    # Fun MeJA 
+pcoa_data_Fun_MeJA_2 <- merge(pcoa_data_Fun_MeJA, avg_pcoa_data_Fun_MeJA, by = "Sp_abb_name")
+
+# Replace "Lr" with "Lv" in the Sp_abb_name column
+pcoa_data_Fun_MeJA_2 <- pcoa_data_Fun_MeJA_2 %>%
+  mutate(Sp_abb_name = case_when(
+    Sp_abb_name == "Lr" ~ "Lv",  # Replace "Lr" with "Lv"
+    TRUE ~ Sp_abb_name           # Keep other values unchanged
+  ))
+
+# Replace "Bo_M" with "Bo" in the Sp_abb_name column
+pcoa_data_Fun_MeJA_2 <- pcoa_data_Fun_MeJA_2 %>%
+  mutate(Sp_abb_name = case_when(
+    Sp_abb_name == "Bo_M" ~ "Bo",  # Replace "Bo_M" with "Bo"
+    TRUE ~ Sp_abb_name           # Keep other values unchanged
+  ))
+
+# plot
+pcoa_data_Fun_MeJA_2$SuperTribe <- factor(pcoa_data_Fun_MeJA_2$SuperTribe, levels = c("Camelinodae_(I)", "Brassicodae_(II)", "Hesperodae_(III)", "Arabodae_(IV)", "Heliophilodae_(V)", "Unplaced"))
+
+p5 <- ggplot(pcoa_data_Fun_MeJA_2,aes(PC1,PC2,color=SuperTribe)) +
+  geom_point(size=2, alpha=0.3) + 
+  geom_text(data=pcoa_data_Fun_MeJA_2, aes(x=mean_PC1, y=mean_PC2,label= Sp_abb_name),size=5) +  
+  geom_segment(aes(x=mean_PC1, y=mean_PC2, xend=PC1, yend=PC2), alpha = 0.3) +
+  labs(
+    x = paste0("PC1 (", round(variance_Fun_MeJA[1], 2), "%)"),
+    y = paste0("PC2 (", round(variance_Fun_MeJA[2], 2), "%)"),
+    title = "PCoA ITS MeJA"
+  ) +
+  scale_color_manual(values=colors)+
+    theme_bw() + 
+    theme(text = element_text(size = 20))
+
+ggsave("PCoA_SuperTribe_centroid_Fun_MeJA.png", path = "./02_Beta_Diversity/results",
+         width = 30, height = 20, units = "cm")
+ 
+  ggsave("PCoA_SuperTribe_centroid_Fun_MeJA.pdf", path = "./02_Beta_Diversity/results",
+         width = 30, height = 20, units = "cm")    
+  
+
+      # Fun SA 
+pcoa_data_Fun_SA_2 <- merge(pcoa_data_Fun_SA, avg_pcoa_data_Fun_SA, by = "Sp_abb_name")
+
+# Replace "Lr" with "Lv" in the Sp_abb_name column
+pcoa_data_Fun_SA_2 <- pcoa_data_Fun_SA_2 %>%
+  mutate(Sp_abb_name = case_when(
+    Sp_abb_name == "Lr" ~ "Lv",  # Replace "Lr" with "Lv"
+    TRUE ~ Sp_abb_name           # Keep other values unchanged
+  ))
+
+# Replace "Bo_M" with "Bo" in the Sp_abb_name column
+pcoa_data_Fun_MeJA_2 <- pcoa_data_Fun_MeJA_2 %>%
+  mutate(Sp_abb_name = case_when(
+    Sp_abb_name == "Bo_M" ~ "Bo",  # Replace "Bo_M" with "Bo"
+    TRUE ~ Sp_abb_name           # Keep other values unchanged
+  ))
+
+# plot
+pcoa_data_Fun_SA_2$SuperTribe <- factor(pcoa_data_Fun_SA_2$SuperTribe, levels = c("Camelinodae_(I)", "Brassicodae_(II)", "Hesperodae_(III)", "Arabodae_(IV)", "Heliophilodae_(V)", "Unplaced"))
+
+p6 <- ggplot(pcoa_data_Fun_SA_2,aes(PC1,PC2,color=SuperTribe)) +
+  geom_point(size=2, alpha=0.3) + 
+  geom_text(data=pcoa_data_Fun_SA_2, aes(x=mean_PC1, y=mean_PC2,label= Sp_abb_name),size=5) +  
+  geom_segment(aes(x=mean_PC1, y=mean_PC2, xend=PC1, yend=PC2), alpha = 0.3) +
+  labs(
+    x = paste0("PC1 (", round(variance_Fun_SA[1], 2), "%)"),
+    y = paste0("PC2 (", round(variance_Fun_SA[2], 2), "%)"),
+    title = "PCoA ITS SA"
+  ) +
+  scale_color_manual(values=colors)+
+    theme_bw() + 
+    theme(text = element_text(size = 20))
+
+ggsave("PCoA_SuperTribe_centroid_Fun_SA.png", path = "./02_Beta_Diversity/results",
+         width = 30, height = 20, units = "cm")
+ 
+  ggsave("PCoA_SuperTribe_centroid_Fun_SA.pdf", path = "./02_Beta_Diversity/results",
+         width = 30, height = 20, units = "cm")    
+  
+#Merge all the plot together 
+  library(patchwork)
+
+p1 <- p1 + theme(legend.position = "none")
+p2 <- p2 + theme(legend.position = "none")
+p3 <- p3 + theme(legend.position = "none")
+p4 <- p4 + theme(legend.position = "none")
+p5 <- p5 + theme(legend.position = "none")
+p6 <- p6 + theme(legend.position = "none")
+    
+p_merged <- (p1 | p4) /
+            (p2 | p5) /
+            (p3 | p6)   #figure used for Supplementary SX7
+
+ggsave("PCoA_SuperTribe_centroid_all.png", path = "./02_Beta_Diversity/results",
+         width = 35, height = 45, units = "cm")
+ 
+  ggsave("PCoA_SuperTribe_centroid_all.pdf", path = "./02_Beta_Diversity/results",
+         width = 35, height = 45, units = "cm")   
+  
+  
+  
+  
+#adding the PC1 values to the x axis
+  
+p_Bac_cntrl_vs_SA <- (p1 | p3) #plots used for new Figure 1
+
+ggsave("PCoA_SuperTribe_centroid_Bac_cntrl_vs_SA.png", path = "./02_Beta_Diversity/results",
+         width = 55, height =25 ,units = "cm")
+ 
+  ggsave("PCoA_SuperTribe_centroid_Bac_cntrl_vs_SA.pdf", path = "./02_Beta_Diversity/results",
+         width = 55, height = 25, units = "cm")   
+  
+  #control bac
+  p1_B<-
+  ggplot(pcoa_data_Bac_cntrl_2,aes(PC1,PC2,color=SuperTribe)) +
+  geom_point(size=2, alpha=0.3) + 
+    geom_point(aes(x=mean_PC1,y=-Inf), size = 5) +
+  coord_cartesian(clip = 'off') +
+  geom_text(data=pcoa_data_Bac_cntrl_2, aes(x=mean_PC1, y=mean_PC2,label= Sp_abb_name),size=5) +  
+  geom_segment(aes(x=mean_PC1, y=mean_PC2, xend=PC1, yend=PC2), alpha = 0.3) +
+
+  labs(
+    x = paste0("PC1 (", round(variance_Bac_cntrl[1], 2), "%)"),
+    y = paste0("PC2 (", round(variance_Bac_cntrl[2], 2), "%)"),
+    title = "PCoA 16S control"
+  ) +
+  scale_color_manual(values=colors)+
+    theme_bw() + 
+    theme(text = element_text(size = 20))
+  
+ggsave("PCoA_SuperTribe_centroid_Bac_cntrl_PC1axis.png", path = "./02_Beta_Diversity/results",
+         width = 30, height = 20, units = "cm")
+ 
+  ggsave("PCoA_SuperTribe_centroid_Bac_cntrl_PC1axis.pdf", path = "./02_Beta_Diversity/results",
+         width = 30, height = 20, units = "cm")
+  
+  #SA bac
+  p3_B <- 
+  ggplot(pcoa_data_Bac_SA_2,aes(PC1,PC2,color=SuperTribe)) +
+  geom_point(size=2, alpha=0.3) + 
+    geom_point(aes(x=mean_PC1,y=-Inf), size = 5) +
+  coord_cartesian(clip = 'off') +
+  geom_text(data=pcoa_data_Bac_SA_2,aes(x=mean_PC1, y=mean_PC2,label= Sp_abb_name),size=5) +  
+  geom_segment(aes(x=mean_PC1, y=mean_PC2, xend=PC1, yend=PC2), alpha = 0.3) +
+
+  labs(
+    x = paste0("PC1 (", round(variance_Bac_SA[1], 2), "%)"),
+    y = paste0("PC2 (", round(variance_Bac_SA[2], 2), "%)"),
+    title = "PCoA 16S SA"
+  ) +
+  scale_color_manual(values=colors)+
+    theme_bw() + 
+    theme(text = element_text(size = 20))
+  
+ggsave("PCoA_SuperTribe_centroid_Bac_SA_PC1axis.png", path = "./02_Beta_Diversity/results",
+         width = 30, height = 20, units = "cm")
+ 
+  ggsave("PCoA_SuperTribe_centroid_Bac_SA_PC1axis.pdf", path = "./02_Beta_Diversity/results",
+         width = 30, height = 20, units = "cm")  
+  
+  #join control and SA plots
+  
+  p1_B <- p1_B + theme(legend.position = "none")
+  p3_B <- p3_B + theme(legend.position = "none")
+  (p1_B | p3_B) #figure used to get the dots for Axis 1
+  
+  ggsave("PCoA_SuperTribe_centroid_Bac_cntrl_vs_SA_PC1axis.png", path = "./02_Beta_Diversity/results",
+         width = 55, height =25 ,units = "cm")
+ 
+  ggsave("PCoA_SuperTribe_centroid_Bac_cntrl_vs_SA_PC1axis.pdf", path = "./02_Beta_Diversity/results",
+         width = 55, height = 25, units = "cm")  
+  
+ 
+
+  
+```
+ 
+
+
+# 2.3. Permanovas
+
+### 2.3.1. PERMANOVAS all samples (Supplementary table S4 A and B)
+```{r}
+#testing permanovas 16S 
+CSS_Bac_ps <- CSS_BacFun_tree_l$Bac
+
+set.seed(303848)
+permanova_Bac_all <- adonis2(formula = phyloseq::distance(t(otu_table(CSS_Bac_ps)), method="bray") ~ Sp_full_name  + Stress + Sp_full_name*Stress + Block,
+              data = as(sample_data(CSS_Bac_ps),"data.frame"), # changing with as.data.frame is insufficient
+              permutations = 999, by = "terms")
+
+save(permanova_Bac_all, 
+     file = "./02_Beta_Diversity/r_objects/permanova_Bac_all.RData")
+
+
+#testing permanovas ITS 
+CSS_Fun_ps <- CSS_BacFun_tree_l$Fun
+
+set.seed(303848)
+permanova_Fun_all <- adonis2(formula = phyloseq::distance(t(otu_table(CSS_Fun_ps)), method="bray") ~ Sp_full_name  + Stress + Sp_full_name*Stress + Block,
+              data = as(sample_data(CSS_Fun_ps),"data.frame"), # changing with as.data.frame is insufficient
+              permutations = 999, by = "terms")
+
+save(permanova_Fun_all, 
+     file = "./02_Beta_Diversity/r_objects/permanova_Fun_all.RData")
+
+```
+
+### 2.3.2. Permanova per plant species (Supplementary Figure S6-B)
+Here we check the pairwise effect of the treatment (control vs MeJA, control vs SA) in eachplant species
+
+#### For 16S samples
+
+```{r}
+
+# list of lists per stress
+CSS_species_ps_l #input list 
+
+set.seed(303848)
+permanova_Bac_results <- lapply(CSS_species_ps_l$Bac, function (x)
+       adonis2(formula = phyloseq::distance(t(otu_table(x)), method="bray") 
+               ~ Stress  + Block,
+              data = as(sample_data(x),"data.frame"), # changing with as.data.frame is insufficient
+              permutations = 999,  by = "margin")) #when we use by="margin" order of factors doesn't matter
+
+#Save permanova results as an external object 
+save(permanova_Bac_results, 
+     file = "./02_Beta_Diversity/r_objects/permanova_Bac_per_species.RData")
+
+#load("./02_Beta_Diversity/r_objectspermanova_Bac_per_species.RData")
+
+
+# Pairwise PERMANOVA 16S Stress factor
+set.seed(303848)
+pairwise_permanova_bac <- lapply(CSS_species_ps_l$Bac, function (x)
+  adonis.pair(dist.mat= phyloseq::distance(otu_table(x), method="bray"),
+              Factor= as.factor(as(phyloseq::sample_data(x),"data.frame")$Stress)))
+
+save(pairwise_permanova_bac, 
+     file = "./02_Beta_Diversity/results/pairwise_permanova_bac.RData")
+
+#load("./02_Beta_Diversity/results/pairwise_permanova_bac.RData")
+
+#Extracting the p-values
+
+p_values_pairwise <- function(pairwise_permanova_bac)
+  
+{
+  
+  # First we select the corrected pvalues of the pairwise analysis
+  
+  p_values <-map(pairwise_permanova_bac, 7)
+  r_values <-map(pairwise_permanova_bac, 5)
+  species_name <- names(c(p_values))
+  
+  # We create a data frame for each pairwise comparison
+  
+  Cntrl_MeJA_pvalue <- as.vector(unlist(map(p_values,1)))
+  Cntrl_MeJA_R2 <-  as.vector(unlist(map(r_values,1)))
+  pair1 <- rep("Cntrl vs MeJA")
+  df_1 <- data.frame(species_name, pair1, Cntrl_MeJA_pvalue, Cntrl_MeJA_R2)
+  names(df_1)<-c("species","treatment", "corrected_pvalue", "R2")
+  
+  
+  Cntrl_SA_pvalue <- as.vector(unlist(map(p_values,2)))
+  Cntrl_SA_R2 <- as.vector(unlist(map(r_values,2)))
+  pair2 <- rep("Cntrl vs SA")
+  df_2 <- data.frame(species_name, pair2, Cntrl_SA_pvalue, Cntrl_SA_R2)
+  names(df_2)<-c("species","treatment", "corrected_pvalue", "R2")
+  
+  
+  MeJA_SA_pvalue <- as.vector(unlist(map(p_values,3)))
+  MeJA_SA_rvalue <- as.vector(unlist(map(r_values,3)))
+  pair3 <- rep("MeJA vs SA")
+  df_3 <- data.frame(species_name, pair3, MeJA_SA_pvalue, MeJA_SA_rvalue)
+  names(df_3)<-c("species","treatment", "corrected_pvalue", "R2")
+  
+# We merge the 3 data frames in a single one
+  
+  df_list <- list(df_1, df_2, df_3)
+  
+  output_df <-Reduce(function(x, y) merge(x, y, all=TRUE), df_list)
+
+  print(output_df)
+}
+
+# Pairwise p-values and plots for 16S
+
+p_values_pairwise_bac_df <-  p_values_pairwise(pairwise_permanova_bac)
+
+p_values_pairwise_bac_df <- p_values_pairwise_bac_df %>%
+                                        mutate(Significance = 
+                                        case_when(corrected_pvalue <= 0.001 ~ "< 0.001",
+                                        corrected_pvalue <= 0.01 ~ "< 0.01",
+                                        corrected_pvalue <= 0.05 ~ "< 0.05",
+                                        TRUE ~ as.character(corrected_pvalue)))
+
+
+p_values_pairwise_bac_df <- p_values_pairwise_bac_df%>%
+    arrange(match(species, phylogeny_vector)) 
+
+write.csv(p_values_pairwise_bac_df, "./02_Beta_diversity/results/p_values_pairwise_bac_df.csv", row.names=FALSE)
+
+p_values_pairwise_MeJA_bac_df <- p_values_pairwise_bac_df %>% filter(treatment == "Cntrl vs MeJA")
+write.csv(p_values_pairwise_MeJA_bac_df, "./02_Beta_diversity/results/p_values_pairwise_bac_df_MeJA.csv", row.names=FALSE)
+
+p_values_pairwise_SA_bac_df <- p_values_pairwise_bac_df %>% filter(treatment == "Cntrl vs SA")
+write.csv(p_values_pairwise_SA_bac_df, "./02_Beta_diversity/results/p_values_pairwise_bac_df_SA.csv", row.names=FALSE)
+
+```
+
+#### For ITS samples
+
+```{r}
+# list of lists per stress
+CSS_species_ps_l #input list 
+
+# Pairwise PERMANOVA ITS Stress factor
+set.seed(303848)
+pairwise_permanova_fun <- lapply(CSS_species_ps_l$Fun, function (x)
+  adonis.pair(dist.mat= phyloseq::distance(otu_table(x), method="bray"),
+              Factor= as.factor(as(phyloseq::sample_data(x),"data.frame")$Stress)))
+
+save(pairwise_permanova_fun, 
+     file = "./02_Beta_Diversity/results/pairwise_permanova_fun.RData")
+
+#load("./02_Beta_Diversity/results/pairwise_permanova_fun.RData")
+
+
+# Pairwise p-values and plots for 16S
+
+p_values_pairwise_fun_df <-  p_values_pairwise(pairwise_permanova_fun)
+
+p_values_pairwise_fun_df <- p_values_pairwise_fun_df %>%
+                                        mutate(Significance = 
+                                        case_when(corrected_pvalue <= 0.001 ~ "< 0.001",
+                                        corrected_pvalue <= 0.01 ~ "< 0.01",
+                                        corrected_pvalue <= 0.05 ~ "< 0.05",
+                                        TRUE ~ as.character(corrected_pvalue)))
+
+p_values_pairwise_fun_df <- p_values_pairwise_fun_df%>%
+    arrange(match(species, phylogeny_vector))
+
+write.csv(p_values_pairwise_fun_df, "./02_Beta_diversity/results/p_values_pairwise_fun_df.csv", row.names=FALSE)
+
+p_values_pairwise_MeJA_fun_df <- p_values_pairwise_fun_df %>% filter(treatment == "Cntrl vs MeJA")
+write.csv(p_values_pairwise_MeJA_fun_df, "./02_Beta_diversity/results/p_values_pairwise_fun_df_MeJA.csv", row.names=FALSE)
+
+p_values_pairwise_SA_fun_df <- p_values_pairwise_fun_df %>% filter(treatment == "Cntrl vs SA")
+write.csv(p_values_pairwise_SA_fun_df, "./02_Beta_diversity/results/p_values_pairwise_fun_df_SA.csv", row.names=FALSE)
+
+
+
+```
+
+
+### 2.3.3.PERMANOVA per stess (Statistics supplementary Figure S8)
+
+```{r}
+
+# Here we want to test the effect of the pant species in each treatment 
+CSS_Stress_ps_l #we need this CSS object
+
+#Permanova 16S control 
+set.seed(303848)
+permanova_Bac_control <- adonis2(formula = phyloseq::distance(t(otu_table(CSS_Stress_ps_l$Bac$Control)), method="bray") ~ Sp_full_name,
+              data = as(sample_data(CSS_Stress_ps_l$Bac$Control),"data.frame"), # changing with as.data.frame is insufficient
+              permutations = 999, by = "margin")
+
+save(permanova_Bac_control, 
+     file = "./02_Beta_Diversity/r_objects/permanova_Bac_control.RData") #supplementary Figure S8-A
+
+#load("./02_Beta_Diversity/r_objects/permanova_Bac_control.RData")
+
+table <- nice_table(permanova_Bac_control,
+              title = c("Table X. PERMANOVA of Bray curtis distances of 16S samples in control treatment"),
+              note = "~ Pant species")
+
+table <- table %>%
+         flextable::colformat_num(big.mark = "", digits = 3) 
+
+flextable::save_as_docx(table, path = "./02_Beta_Diversity/results/permanova_Bac_control.docx") #supplementary Figure S8-A
+
+
+#Permanova 16S MeJA 
+set.seed(303848)
+permanova_Bac_MeJA <- adonis2(formula = phyloseq::distance(t(otu_table(CSS_Stress_ps_l$Bac$MeJA)), method="bray") ~ Sp_full_name,
+              data = as(sample_data(CSS_Stress_ps_l$Bac$MeJA),"data.frame"), # changing with as.data.frame is insufficient
+              permutations = 999, by = "margin")
+
+save(permanova_Bac_MeJA, 
+     file = "./02_Beta_Diversity//r_objects/permanova_Bac_MeJA.RData")
+
+#load("./02_Beta_Diversity/r_objects/permanova_Bac_MeJA.RData")
+
+table <- nice_table(permanova_Bac_MeJA,
+              title = c("Table X. PERMANOVA of Bray curtis distances of 16S samples in MeJA treatment"),
+              note = "~ Pant species")
+
+table <- table %>%
+         flextable::colformat_num(big.mark = "", digits = 3) 
+
+flextable::save_as_docx(table, path = "./02_Beta_Diversity/results//permanova_Bac_MeJA.docx") #supplementary Figure S8-B
+
+
+
+#Permanova 16S SA 
+set.seed(303848)
+permanova_Bac_SA <- adonis2(formula = phyloseq::distance(t(otu_table(CSS_Stress_ps_l$Bac$SA)), method="bray") ~ Sp_full_name,
+              data = as(sample_data(CSS_Stress_ps_l$Bac$SA),"data.frame"), # changing with as.data.frame is insufficient
+              permutations = 999, by = "margin")
+
+save(permanova_Bac_SA, 
+     file = "./02_Beta_Diversity/r_objects/permanova_Bac_SA.RData")
+
+#load("./02_Beta_Diversity/r_objects/permanova_Bac_SA.RData")
+
+table <- nice_table(permanova_Bac_SA,
+              title = c("Table X. PERMANOVA of Bray curtis distances of 16S samples in SA treatment"),
+              note = "~ Pant species")
+
+table <- table %>%
+         flextable::colformat_num(big.mark = "", digits = 3) 
+
+flextable::save_as_docx(table, path = "./02_Beta_Diversity/results/permanova_Bac_SA.docx") #supplementary Figure S8-C
+
+
+#Permanova ITS control 
+set.seed(303848)
+permanova_fUN_control <- adonis2(formula = phyloseq::distance(t(otu_table(CSS_Stress_ps_l$Fun$Control)), method="bray") ~ Sp_full_name,
+              data = as(sample_data(CSS_Stress_ps_l$Fun$Control),"data.frame"), # changing with as.data.frame is insufficient
+              permutations = 999, by = "margin")
+
+save(permanova_fUN_control, 
+     file = "./02_Beta_Diversity/r_objects/permanova_Fun_control.RData")
+
+#load("./02_Beta_Diversity/r_objects/permanova_Fun_control.RData")
+
+table <- nice_table(permanova_Fun_control,
+              title = c("Table X. PERMANOVA of Bray curtis distances of ITS samples in control treatment"),
+              note = "~ Pant species")
+
+table <- table %>%
+         flextable::colformat_num(big.mark = "", digits = 3) 
+
+flextable::save_as_docx(table, path = "./02_Beta_Diversity/results/permanova_Fun_control.docx") #supplementary Figure S8-D
+
+
+
+#Permanova ITS MeJA 
+set.seed(303848)
+permanova_Fun_MeJA <- adonis2(formula = phyloseq::distance(t(otu_table(CSS_Stress_ps_l$Fun$MeJA)), method="bray") ~ Sp_full_name,
+              data = as(sample_data(CSS_Stress_ps_l$Fun$MeJA),"data.frame"), # changing with as.data.frame is insufficient
+              permutations = 999, by = "margin")
+
+save(permanova_Fun_MeJA, 
+     file = "./02_Beta_Diversity/r_objects/permanova_Fun_MeJA.RData")
+
+#load("./02_Beta_Diversity/r_objects/permanova_Fun_MeJA.RData")
+
+table <- nice_table(permanova_Fun_MeJA,
+              title = c("Table X. PERMANOVA of Bray curtis distances of ITS samples in MeJA treatment"),
+              note = "~ Pant species")
+
+table <- table %>%
+         flextable::colformat_num(big.mark = "", digits = 3) 
+
+flextable::save_as_docx(table, path = "./02_Beta_Diversity/results/permanova_Fun_MeJA.docx") #supplementary Figure S8-E
+
+#Permanova ITS SA 
+set.seed(303848)
+permanova_Fun_SA <- adonis2(formula = phyloseq::distance(t(otu_table(CSS_Stress_ps_l$Fun$SA)), method="bray") ~ Sp_full_name,
+              data = as(sample_data(CSS_Stress_ps_l$Fun$SA),"data.frame"), # changing with as.data.frame is insufficient
+              permutations = 999, by = "margin")
+
+save(permanova_Fun_SA, 
+     file = "./02_Beta_Diversity/r_objects/permanova_Fun_SA.RData")
+
+#load("./02_Beta_Diversity/r_objects/permanova_Fun_SA.RData")
+
+
+table <- nice_table(permanova_Fun_SA,
+              title = c("Table X. PERMANOVA of Bray curtis distances of ITS samples in SA treatment"),
+              note = "~ Pant species")
+
+table <- table %>%
+         flextable::colformat_num(big.mark = "", digits = 3) 
+
+flextable::save_as_docx(table, path = "./02_Beta_Diversity/results//permanova_Fun_SA.docx") #supplementary Figure S8-F
+
+
+
+
+```
+
+
+\`\`\`

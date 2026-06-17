@@ -1,0 +1,23 @@
+#!/bin/bash -login
+
+#SBATCH --time=96:00:00                                        ### limit of wall clock time - how long the job will run (same as -t)
+#SBATCH --ntasks=1                                            ### number of tasks - how many tasks (nodes) that you require (same as -n)
+#SBATCH --cpus-per-task=16                        ### number of CPUs (or cores) per task (same as -c)
+#SBATCH --mem=300G                                              ### memory required per node - amount of memory (in bytes)
+#SBATCH --job-name 528x3_permanovas                    ### you can give your job a name for easier identification (same as -J)
+#SBATCH --output="528x3_permanovas_%j.out"              ### name of the output file
+
+# unload gcc, which was giving errors when laoding R
+module unload gcc
+module unload R/4.1.2
+
+
+# make R available to your enviroment
+module load R/4.1.2
+
+# start running R
+Rscript 528x3_permanovas.R --save
+
+# clean session
+module unload R/4.1.2
+

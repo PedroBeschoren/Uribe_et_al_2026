@@ -1,0 +1,451 @@
+---
+title: "4_neutral_models_AllSpecies"
+author: "Marcela Aragon"
+date: "3/29/2022"
+output: 
+  pdf_document: default
+  html_document: default
+editor_options:
+  chunk_output_type: console
+---
+
+# 3.1 - load libraries
+
+```{r}
+# this will load all key libraries for the whole project
+source("./renv/0_load_libraries.R")
+
+# increases memory limit used by R
+memory.limit(size = 350000)
+
+```
+
+# 3.2 - load data
+
+```{R}
+# load data 
+load("./Data/phyloseq_objects/rarefied_BacFun_rhizoplane_HighFilt_ps.RData")
+
+# remove all species outside the MY trees
+rarefied_BacFun_rhizoplane_HighFilt_ps<-lapply(rarefied_BacFun_rhizoplane_HighFilt_ps, function(x)  subset_samples(x, MY_tree_presence == "inside_MY_tree"))
+
+```
+
+# 3.3 - split ps objects into suitable lists for the NM pipeline
+
+```{R}
+#create empty list
+neutral_pairwise_ps<-list()
+
+# make separate objects wint onyl Meja-control or SA-control
+neutral_pairwise_ps[1:2]<-lapply(rarefied_BacFun_rhizoplane_HighFilt_ps, function(x)  subset_samples(x, Stress != "SA"))
+neutral_pairwise_ps[3:4]<-lapply(rarefied_BacFun_rhizoplane_HighFilt_ps, function(x)  subset_samples(x, Stress != "MeJA"))
+
+#adjsut list anmes
+names(neutral_pairwise_ps)<-c("Bac_MeJA_Control", "Fun_MeJA_Control", "Bac_SA_Control", "Fun_SA_Control")
+
+
+# split by 22 species
+BacFun_22sp_l_l <- lapply(neutral_pairwise_ps, function(x) metagMisc::phyloseq_sep_variable(x, variable = "Sp_abb_name")) 
+
+```
+
+
+# 3.4 - create 66 models(sp*stress), using all samples from a species as the pool
+```{r}
+
+
+# define a function to split a species in 2 stresses, retuning 4 models per species
+split_by_stress_and_fit_sncm<- function(phyloseq){
+  
+   input_for_model_split_by_stress<- metagMisc::phyloseq_sep_variable(phyloseq, variable = "Stress")
+   
+   neutral_model_output<-lapply(input_for_model_split_by_stress, function(x)
+                          tyRa::fit_sncm(spp = t(otu_table(x)), 
+                                         pool = t(otu_table(phyloseq)), 
+                                         taxon = data.frame(tax_table(x))))
+               
+   return(neutral_model_output)
+
+}
+
+
+
+#run the custom function for all stresses of all species in both Bac and Fun
+neutral_Bacfun_22sp_2pairwise_l_l_l<-lapply(BacFun_22sp_l_l, function(x)
+  lapply(x, function(y)
+    split_by_stress_and_fit_sncm(y)))
+
+
+
+# plot a few neutral models to check
+plot_sncm_fit(neutral_Bacfun_22sp_2pairwise_l_l_l$Bac_MeJA_Control$At$MeJA)
+plot_sncm_fit(neutral_Bacfun_22sp_2pairwise_l_l_l$Bac_MeJA_Control$At$Control)
+
+
+
+```
+
+
+
+## 3.4.1 - extract R2 fit and m parameters 
+
+
+```{r}
+
+
+
+
+# fit stats of all neutral models, keeps only M and R square of that list
+fitstats_l_l<-lapply(neutral_Bacfun_22sp_2pairwise_l_l_l, function (y)
+  lapply(y, function(x){
+  
+Control_fitstats <- data.frame(x[[1]]$fitstats[c(1,4, 11:12)])
+Stress_fitstats <-   data.frame(x[[2]]$fitstats[c(1,4, 11:12)])
+
+output<-rbind(Control_fitstats,
+              Stress_fitstats)
+
+output$Stress<-c("Control", names(x)[2])
+
+return(output)  
+  
+}))
+
+#put all species in a list
+fitstats_df_l<-lapply(fitstats_l_l, function(x)
+  as.data.frame(do.call(rbind, x)))
+
+#adjust rownames as species names
+fitstats_df_l<-lapply(fitstats_df_l, function(y){
+df_out<-rownames_to_column(.data = y,var = "Sp_abb_name")
+df_out$Sp_abb_name<-gsub(pattern = "\\..", replacement = "", x= df_out$Sp_abb_name)
+return(df_out)
+})
+
+# put bac and fun in the same DF
+fitstats_df_l$Bac_MeJA_Control$Kingdom<-"Bac"
+fitstats_df_l$Bac_SA_Control$Kingdom<-"Bac"
+fitstats_df_l$Fun_MeJA_Control$Kingdom<-"Fun"
+fitstats_df_l$Fun_SA_Control$Kingdom<-"Fun"
+fitstats_df<-rbind(fitstats_df_l[[1]],
+                   fitstats_df_l[[2]],
+                   fitstats_df_l[[3]],
+                   fitstats_df_l[[4]])
+
+# make the Sp_abb_name a factor that fallows the phylogeny level
+fitstats_df$Sp_abb_name<-factor(fitstats_df$Sp_abb_name, levels = levels(rarefied_BacFun_rhizoplane_HighFilt_ps$Bac@sam_data$Sp_abb_name))
+
+
+
+#this output df has key neutral model metrics
+fitstats_df
+
+
+
+
+```
+
+## 3.4.2 -  plot the R and m values
+
+```{r}
+
+#plot R2 and m, more details to follow (or to be skipped)
+plot_r_neutral<-ggplot(fitstats_df, aes(x= Rsqr, y= Sp_abb_name, color = Kingdom) ) + 
+  geom_point(size=2)+
+  facet_wrap(~Stress)+
+  scale_y_discrete(limits=rev)+
+  theme_bw()+
+  theme(text= element_text(size=10))
+
+#plot R2 and m, more details to follow (or to be skipped)
+plot_m_neutral<-ggplot(fitstats_df, aes(x= m, y= Sp_abb_name, color = Kingdom) ) + 
+  geom_point(size=2)+
+  facet_wrap(~Stress)+
+  scale_y_discrete(limits=rev)+
+  theme_bw()+
+  theme(text= element_text(size=10))
+
+#save and as a single plot
+plot_r_m_neutral_2pairwise<-ggarrange(plot_r_neutral, plot_m_neutral, 
+                                      labels = c("NM_r2_2pairwise", "NM_m_2pairwise"), 
+                                      common.legend = TRUE,
+                                      vjust = 0)
+
+#export plot
+ggsave(plot_r_m_neutral_2pairwise, 
+       filename = "./04_Neutral_models/plots_PB/plot_r_m_neutral_2pairwise.pdf",
+       height = 20,
+       width = 20,
+       units = "cm")
+
+
+```
+
+## 3.4.3 -  extract ASVs accuring above and below neutrality
+```{r}
+
+# Extracts above-neutral bASVs ad fASVs
+Above_neutral_2pairwise_bASVs_fASVs<-lapply(neutral_Bacfun_22sp_2pairwise_l_l_l, function (z)
+  lapply(z, function(y)
+   lapply(y, function(x)
+    filter(x$predictions, x$predictions$fit_class == "Above prediction")%>%rownames()
+   )
+  )
+)
+
+
+
+# Extracts below-neutral bASVs ad fASVs
+Below_neutral_2pairwise_bASVs_fASVs<-lapply(neutral_Bacfun_22sp_2pairwise_l_l_l, function (z)
+  lapply(z, function(y)
+   lapply(y, function(x)
+    filter(x$predictions, x$predictions$fit_class == "Below prediction")%>%rownames()
+   )
+  )
+)
+
+
+# check bASVs and fASVs dsitributions and structure
+unlist(Above_neutral_2pairwise_bASVs_fASVs$Bac_MeJA_Control)%>%table%>%hist(breaks = 50)
+unlist(Above_neutral_2pairwise_bASVs_fASVs$Bac_MeJA_Control)%>%table%>%sort(decreasing = TRUE)
+
+unlist(Below_neutral_2pairwise_bASVs_fASVs$Bac_MeJA_Control)%>%table%>%hist(breaks = 50)
+unlist(Below_neutral_2pairwise_bASVs_fASVs$Bac_MeJA_Control)%>%table%>%sort(decreasing = TRUE)
+
+
+
+```
+## 3.4.4 - export lists of above-below per species and stress for bacteria and fungi
+
+```{r}
+#save vecor of above-neutral ASVs externally
+save(Above_neutral_2pairwise_bASVs_fASVs, file = "./04_Neutral_models/r_objects/Above_neutral_2pairwise_bASVs_fASVs.RData")
+
+#save vecor of Below-neutral ASVs externally
+save(Below_neutral_2pairwise_bASVs_fASVs, file = "./04_Neutral_models/r_objects/Below_neutral_2pairwise_bASVs_fASVs.RData")
+
+```
+
+
+
+
+# 3.5 -  extract ASVs accuring above neutrality in Stress but not above enutrality in control; and those occuring below neutrality in stress but not below neutrality in control
+This better reflects the differences between control and stress, and also better reflects teh RF and DA methods we are using
+
+ AGREED WITH MELISSA THAT THIS VERISON IS BETTER
+
+```{r}
+
+# remove ASVs that are above neutral in both control and stress (they do not differentiate both conditions)
+differing_ASVs_above_l_l<-
+lapply(Above_neutral_2pairwise_bASVs_fASVs, function(x)
+    lapply(x, function(z){
+      
+    #join control and stress
+    full_list<-union(z[[1]], z[[2]]) 
+    
+    #define control adn stress overlap
+    to_remove<-intersect(z[[1]], z[[2]])
+    
+    # remove overlap from control and stress
+    to_keep<-full_list[!(full_list %in% to_remove)]
+    
+    return(to_keep)
+      
+}))
+
+# remove ASVs that are below neutral in both control and stress (they do not differentiate both conditions)
+differing_ASVs_below_l_l<-
+lapply(Below_neutral_2pairwise_bASVs_fASVs, function(x)
+    lapply(x, function(z){
+      
+    #join control and stress
+    full_list<-union(z[[1]], z[[2]]) 
+    
+    #define control adn stress overlap
+    to_remove<-intersect(z[[1]], z[[2]])
+    
+    # remove overlap from control and stress
+    to_keep<-full_list[!(full_list %in% to_remove)]
+    
+    return(to_keep)
+      
+}))
+
+# join these into a flat list of 22 sp (containng above and below)
+differing_ASVs_above_l_22sp<-lapply(differing_ASVs_above_l_l, function(x) unlist(x)%>%unique)
+differing_ASVs_below_l_22sp<-lapply(differing_ASVs_below_l_l, function(x) unlist(x)%>%unique)
+
+differing_ASVs_above_below_l_22sp<- mapply(function (x,y)
+  c(x,y)%>%unique,
+x = differing_ASVs_above_l_22sp,
+y = differing_ASVs_below_l_22sp,
+SIMPLIFY = FALSE)
+
+# adjust order to better reflect next steps in the golden ASV joining scripts
+differing_ASVs_above_below_l_22sp<-differing_ASVs_above_below_l_22sp[c(1,3,2,4)]
+
+# save externally as .RData
+save(differing_ASVs_above_below_l_22sp, file = "./04_Neutral_models/r_objects/differing_ASVs_above_below_l_22sp.RData")
+
+
+
+```
+
+
+# 3.6 - cluster the species according microbiome types
+```{r}
+# define species present in each microbiome type
+type_LI <- c("At", "Al", "Cas", "Tg", "Ec", "Mm", "Bv",
+              "Lr", "Ds", "Bi",   "Co", "Lm", "Ia", "Es")
+
+type_LII <- c("Br", "Bo_M","Bn", "Sar", "Hi", "Si", "It","Dt")
+
+
+
+
+
+###################################
+##### warning, bad code start #####
+###################################
+
+# looping/lapply failed after trying 10 minutes of trying, I will do this with hard code
+
+# microbiome type_LI, above
+differing_bASVs_above_MeJA_Control_14sp<-
+  differing_ASVs_above_l_l[[1]][names(differing_ASVs_above_l_l[[1]]) %in% type_LI ]
+
+differing_fASVs_above_MeJA_Control_14sp<-
+  differing_ASVs_above_l_l[[2]][names(differing_ASVs_above_l_l[[2]]) %in% type_LI ]
+
+differing_bASVs_above_SA_Control_14sp<-
+  differing_ASVs_above_l_l[[3]][names(differing_ASVs_above_l_l[[3]]) %in% type_LI ]
+
+differing_fASVs_above_SA_Control_14sp<-
+  differing_ASVs_above_l_l[[4]][names(differing_ASVs_above_l_l[[4]]) %in% type_LI ]
+
+
+# microbiome type_LI, below
+differing_bASVs_below_MeJA_Control_14sp<-
+  differing_ASVs_below_l_l[[1]][names(differing_ASVs_below_l_l[[1]]) %in% type_LI ]
+
+differing_fASVs_below_MeJA_Control_14sp<-
+  differing_ASVs_below_l_l[[2]][names(differing_ASVs_below_l_l[[2]]) %in% type_LI ]
+
+differing_bASVs_below_SA_Control_14sp<-
+  differing_ASVs_below_l_l[[3]][names(differing_ASVs_below_l_l[[3]]) %in% type_LI ]
+
+differing_fASVs_below_SA_Control_14sp<-
+  differing_ASVs_below_l_l[[4]][names(differing_ASVs_below_l_l[[4]]) %in% type_LI ]
+
+
+
+
+# microbiome type_LII, above
+differing_bASVs_above_MeJA_Control_8sp<-
+  differing_ASVs_above_l_l[[1]][names(differing_ASVs_above_l_l[[1]]) %in% type_LII ]
+
+differing_fASVs_above_MeJA_Control_8sp<-
+  differing_ASVs_above_l_l[[2]][names(differing_ASVs_above_l_l[[2]]) %in% type_LII ]
+
+differing_bASVs_above_SA_Control_8sp<-
+  differing_ASVs_above_l_l[[3]][names(differing_ASVs_above_l_l[[3]]) %in% type_LII ]
+
+differing_fASVs_above_SA_Control_8sp<-
+  differing_ASVs_above_l_l[[4]][names(differing_ASVs_above_l_l[[4]]) %in% type_LII ]
+
+
+# microbiome type_LII, below
+differing_bASVs_below_MeJA_Control_8sp<-
+  differing_ASVs_below_l_l[[1]][names(differing_ASVs_below_l_l[[1]]) %in% type_LII ]
+
+differing_fASVs_below_MeJA_Control_8sp<-
+  differing_ASVs_below_l_l[[2]][names(differing_ASVs_below_l_l[[2]]) %in% type_LII ]
+
+differing_bASVs_below_SA_Control_8sp<-
+  differing_ASVs_below_l_l[[3]][names(differing_ASVs_below_l_l[[3]]) %in% type_LII ]
+
+differing_fASVs_below_SA_Control_8sp<-
+  differing_ASVs_below_l_l[[4]][names(differing_ASVs_below_l_l[[4]]) %in% type_LII ]
+
+
+# join together above and blow ASVs, uninting all species of the same microbiome type
+#type_LI
+NM_bASVs_MeJA_Control_14sp<-
+union(as.character(unlist(differing_bASVs_above_MeJA_Control_14sp)), 
+      as.character(unlist(differing_bASVs_below_MeJA_Control_14sp)))%>%unique()
+
+NM_fASVs_MeJA_Control_14sp<-
+union(as.character(unlist(differing_fASVs_above_MeJA_Control_14sp)), 
+      as.character(unlist(differing_fASVs_below_MeJA_Control_14sp)))%>%unique()
+
+NM_bASVs_SA_Control_14sp<-
+union(as.character(unlist(differing_bASVs_above_SA_Control_14sp)), 
+      as.character(unlist(differing_bASVs_below_SA_Control_14sp)))%>%unique()
+
+NM_fASVs_SA_Control_14sp<-
+union(as.character(unlist(differing_fASVs_above_SA_Control_14sp)), 
+      as.character(unlist(differing_fASVs_below_SA_Control_14sp)))%>%unique()
+
+
+
+#type_LII
+NM_bASVs_MeJA_Control_8sp<-
+union(as.character(unlist(differing_bASVs_above_MeJA_Control_8sp)), 
+      as.character(unlist(differing_bASVs_below_MeJA_Control_8sp)))%>%unique()
+
+NM_fASVs_MeJA_Control_8sp<-
+union(as.character(unlist(differing_fASVs_above_MeJA_Control_8sp)), 
+      as.character(unlist(differing_fASVs_below_MeJA_Control_8sp)))%>%unique()
+
+NM_bASVs_SA_Control_8sp<-
+union(as.character(unlist(differing_bASVs_above_SA_Control_8sp)), 
+      as.character(unlist(differing_bASVs_below_SA_Control_8sp)))%>%unique()
+
+NM_fASVs_SA_Control_8sp<-
+union(as.character(unlist(differing_fASVs_above_SA_Control_8sp)), 
+      as.character(unlist(differing_fASVs_below_SA_Control_8sp)))%>%unique()
+
+
+
+# join output into a single list
+# here we change teh order of bac and fun; L_I and L_II
+NM_BacFun_MeJASA_differentiating_typeLI<-list(
+"NM_bASVs_MeJA_Control_14sp" = NM_bASVs_MeJA_Control_14sp,
+"NM_bASVs_SA_Control_14sp" = NM_bASVs_SA_Control_14sp,
+"NM_fASVs_MeJA_Control_14sp" = NM_fASVs_MeJA_Control_14sp,
+"NM_fASVs_SA_Control_14sp" = NM_fASVs_SA_Control_14sp)
+
+
+
+
+NM_BacFun_MeJASA_differentiating_typeLII<-list(
+"NM_bASVs_MeJA_Control_8sp" = NM_bASVs_MeJA_Control_8sp,
+"NM_bASVs_MeJA_Control_8sp" = NM_bASVs_SA_Control_8sp,
+"NM_fASVs_MeJA_Control_8sp" = NM_fASVs_MeJA_Control_8sp,
+"NM_fASVs_SA_Control_8sp" = NM_fASVs_SA_Control_8sp)
+
+###################################
+##### bad code ends - sorry!! #####
+###################################
+
+
+
+```
+
+#3.7 - export NM list of 14sp in Li and 8 spi in LII
+```{r}
+#this is our output: Non-neutral ASVs, excluding ASVs that are above selected in both stress and treatment, and clsutered by microbiom type, and separaed by fungi and bacteria
+NM_BacFun_MeJASA_differentiating_typeLI
+NM_BacFun_MeJASA_differentiating_typeLII
+
+
+#save them externally as Li and LII NM ASVs
+save(NM_BacFun_MeJASA_differentiating_typeLI, file = "./04_Neutral_models/r_objects/NM_BacFun_MeJASA_differentiating_typeLI.RData")
+
+save(NM_BacFun_MeJASA_differentiating_typeLII, file = "./04_Neutral_models/r_objects/NM_BacFun_MeJASA_differentiating_typeLII.RData")
+
+
+```
+

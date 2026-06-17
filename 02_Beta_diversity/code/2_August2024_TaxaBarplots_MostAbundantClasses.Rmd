@@ -1,0 +1,87 @@
+---
+title: "5_Aug2024_TaxaBarplots_MostAbundantClasses"
+author: "Melissa"
+date: "2024-08-02"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r, echo =FALSE}
+#Set lib paths and load r object
+.libPaths("C:/Family_experiment/renv/library/R-4.1/x86_64-w64-mingw32")
+
+```
+
+```{r}
+#Load libraries
+library(ggplot2)
+library(phyloseq)
+library("RColorBrewer")
+library(dplyr)
+library(ggpubr)
+library(tidyr)
+theme_set(theme_bw())
+
+```
+
+#Load dataframe with averaged abundances by species and treatment and make a cut-off at 25% abundance
+```{r}
+load("./05_Differential_abundance/Code/Manuscript_v6_Figures/Class_Bac_glom_Sp_abb_name_Stress_relab_df.RData")
+
+#Cut-off at 0.25%
+Class_Bac_glom_Sp_abb_name_Stress_relab_df_025percent <- Class_Bac_glom_Sp_abb_name_Stress_relab_df
+Class_Bac_glom_Sp_abb_name_Stress_relab_df_025percent$Class[Class_Bac_glom_Sp_abb_name_Stress_relab_df_025percent$Abundance < 0.0025] <- "Class < 0.25% abund."
+```
+
+#Using "endswith" lets create separate treatment and species columns
+```{r}
+#Treatment column
+Class_Bac_glom_Sp_abb_name_Stress_relab_df_025percent <- Class_Bac_glom_Sp_abb_name_Stress_relab_df_025percent %>%
+  mutate(Treatment = case_when(
+    endsWith(Sample, "Control") ~ "Control",
+    endsWith(Sample, "MeJA") ~ "MeJA",
+    endsWith(Sample, "SA") ~ "SA"))
+
+#Species column
+Class_Bac_glom_Sp_abb_name_Stress_relab_df_025percent <- Class_Bac_glom_Sp_abb_name_Stress_relab_df_025percent %>%
+  mutate(Species = gsub("Control|MeJA|SA", "", Sample))
+
+head(Class_Bac_glom_Sp_abb_name_Stress_relab_df_025percent)
+```
+
+#Subset to the Brassicas and organize it as a factor
+```{r}
+#subset
+Class_Bac_glom_Sp_abb_name_Stress_relab_df_025percent <- subset(Class_Bac_glom_Sp_abb_name_Stress_relab_df_025percent, Species %in% c("Al", "At", "Cas", "Tg", "Ec", "Mm", "Ds", "Lr", "Bv", "Bi", "Es", "Br", "Bo_M", "Hi", "Sar", "Dt", "Bn", "It", "Si", "Co", "Lm", "Ia"))
+
+#Organize according to the phylogeny
+phylo_order <- c("Al", "At", "Cas", "Tg", "Ec", "Mm", "Ds", "Lr", "Bv", "Bi", "Es", "Br", "Bo_M", "Hi", "Sar", "Dt", "Bn", "It", "Si", "Co", "Lm", "Ia")
+Class_Bac_glom_Sp_abb_name_Stress_relab_df_025percent <- Class_Bac_glom_Sp_abb_name_Stress_relab_df_025percent %>%
+ mutate(Species = factor(Species, levels = phylo_order)) %>%
+  arrange(Species)
+
+#Change Bo_M for Bo
+phylo_order <- c("Al", "At", "Cas", "Tg", "Ec", "Mm", "Ds", "Lr", "Bv", "Bi", "Es", "Br", "Bo_M", "Hi", "Sar", "Dt", "Bn", "It", "Si", "Co", "Lm", "Ia")
+
+```
+
+#Plot horizontal
+```{r}
+#Expand a color palette to fit 13 colors
+nb.cols.bacteria <- 13
+mycolors.bacteria <- colorRampPalette(brewer.pal(12, "Paired"))(nb.cols.bacteria)
+
+##Plot stacked bar plot for only new dataframe with Brassicas
+onlyBrassi_plot_025percent_Class_Bac_glom_Sp_abb_name_Stress_relab_df <- ggplot(data=Class_Bac_glom_Sp_abb_name_Stress_relab_df_025percent, aes(x=Species, y=Abundance, fill=Class)) +
+     geom_bar(aes(), stat="identity", position="stack") + scale_fill_manual(values = mycolors.bacteria) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 20), legend.text = element_text(size = 18)) +
+  facet_wrap(~Treatment)
+
+png(filename = "./05_Differential_abundance/Code/Manuscript_v6_Figures/onlyBrassi_plot_025percent_Class_Bac_glom_Sp_abb_name_Stress_relab_df.png",
+    width = 9000, height = 1200, units = "px",
+    res = 300)
+onlyBrassi_plot_025percent_Class_Bac_glom_Sp_abb_name_Stress_relab_df
+dev.off()
+```
+

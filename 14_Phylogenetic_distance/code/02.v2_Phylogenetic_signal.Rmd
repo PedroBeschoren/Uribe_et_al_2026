@@ -1,0 +1,1235 @@
+---
+title: "Phylogenetic_signal_v2"
+author: "Marcela Aragon"
+date: "2024-11-18"
+output: html_document
+---
+
+The goal of this script is to test whether different traits we've analyzed so far are more similar between closely related species than those that are father away. For this, I will analyze:
+
+* Plant biomass 
+* Change in plant biomass treatment vs control (Cohen´s D)
+* Alpha diversity metrics
+* R2 values from PERMANOVA
+* R2 value from NM fit 
+
+And calculate (1) phylogenetic signal as *Bloomberg's K* and *Pagel's lambda* as well as (2) a Mantel test to test hierarchical correlations between plant phylogeny and a given trait's distance matrix.
+
+
+# 1.0 set up working environemnt
+
+## 1.01 load libraries with renv, improve memory use
+
+```{r}
+# set working directory to project directory 
+
+library("phyloseq")
+library("ggplot2")
+library("dplyr")
+library("tidyr")
+library("tibble")
+library("car") # for Levene's test
+library("purrr")
+library("ape") #handles phylogenetic objects
+library("TreeTools")
+library("tidytree")
+library("lattice")
+library("phangorn") #UPGMA & NJ
+library("ade4")
+library("distory") #to compare trees
+library("geiger")
+library("phytools") 
+library("stats") #cophenetic distances 
+library("heatmaply")
+library("pheatmap")
+library("RColorBrewer")
+library("viridis")
+library("grid") #change as.grob
+library("ggplotify") #change as.grob
+#library("ggpmisc") #plots R2 and regression lines 
+library("picante")#phylogenetic signal
+library("adephylo")
+library("phylobase")
+library("phylosignal")
+library("vegan")
+library("ggpubr")
+
+#load lapply_lapply
+source("./renv/functions/lapply_lapply.R")
+
+
+```
+
+
+## 1.02 Settings for plots
+
+```{r}
+# Set axis looks
+theme_set(theme_bw())
+axis_looks <- theme(axis.text.x = element_text(colour = "black", size = 10,
+                                               face = "bold"))+
+  theme(axis.text.y = element_text(colour = "black", size = 12, face = "bold"))+
+  theme(axis.title=element_text(size=15, face = "bold"))
+```
+
+
+## 1.02 Load data 
+```{r}
+
+#---- load ps object ----
+load("./Data/phyloseq_objects/CSS_BacFun_rhizoplane_HighFilt_ps_l.RData")
+
+#---- load tree ----
+#Final plant phylogeny from Kasper
+Bra_tree <- read.tree("./17_Plant_phylogeny/Results/Supermatrix_Kasper_tree_renamed_rotated_rooted.tre")
+#quick look
+plot(Bra_tree, type="phylogram", align.tip.label=TRUE)
+phylo_tips <- rev(Bra_tree$tip.label) #vector with phylogeny order of 22 final species with Sp abb name
+
+#---- alpha diversity info ----
+#load("./03_Alpha_diversity/r_objects/Final_paper/Diversity_all_Nov23.RData")
+alpha.Bac <- readRDS(file="./18_Sequencing_depth/results/Bac_alpha_Filt_and_Unfilt_df.rds") #to-do later
+alpha.Fun <- readRDS(file="./18_Sequencing_depth/results/Fun_alpha_Filt_and_Unfilt_df.rds") #to-do later
+diversity_all <- list(alpha.Bac, alpha.Fun)
+
+#add names
+names(diversity_all) <- c("Bac", "Fun")
+diversity_all$Bac #ok
+
+#check how many species
+levels(diversity_all$Bac$Sp_abb_name) #22, ok
+
+#---- Cohen's D information ----
+#load("./15_Plant_Biomass/Objects/shoot_biomass_CohenD.Rdata")
+#all_cohen_df 
+#all_cohen_df$estimate #this is the value of treatment vs control 
+
+#---- PCoA information ----
+load("./14_Phylogenetic_distance/r_objects/pcoa_coordinates_Bac_l.RData")
+load("./14_Phylogenetic_distance/r_objects/pcoa_coordinates_Fun_l.RData")
+
+#list with PC1 and PC2 per stress treatment 
+pcoa_coordinates_Bac_l
+pcoa_coordinates_Fun_l
+
+```
+
+
+
+# Make DFs
+from the metadata info it would be important to check: 
+
+*Amplicon_concentation_ngul
+*Plastid_reads
+*Host_DNA_contamination_pct
+*Library size (updated)
+*Biomass
+*PC1 and PC2
+
+
+```{r}
+#---- Library size new ----
+#library size new means the final number of reads after Chrat's filtering (HighFilt)
+
+#First add library size 
+library_size_new <- sample_sums(CSS_BacFun_rhizoplane_HighFilt_ps_l$Bac)
+sample_data(CSS_BacFun_rhizoplane_HighFilt_ps_l$Bac)$library_size_new <- library_size_new
+
+library_size_newF <- sample_sums(CSS_BacFun_rhizoplane_HighFilt_ps_l$Fun)
+sample_data(CSS_BacFun_rhizoplane_HighFilt_ps_l$Fun)$library_size_new <- library_size_newF
+
+#now get df 
+metadata_B <- data.frame(sample_data(CSS_BacFun_rhizoplane_HighFilt_ps_l$Bac))
+metadata_F <- data.frame(sample_data(CSS_BacFun_rhizoplane_HighFilt_ps_l$Fun))
+
+colnames(metadata_F)
+
+#---- Sequencing traits ----
+
+traits <- c("Amplicon_concentation_ngul", "Plastid_reads", "Host_DNA_contamination_pct", "library_size_new")
+traitsB <- metadata_B %>% 
+                group_by(Sp_abb_name,Stress)%>%
+                summarise(across(
+      all_of(traits),  # Use the vector of column names
+      ~ mean(.x, na.rm = TRUE)))       # Keep original column name and add "_Bac"
+
+traitsB <- traitsB %>% filter(Sp_abb_name %in% phylo_tips) #66 (22 x 3 treatments)
+
+
+traitsF <- c("Amplicon_concentation_ngul",  "library_size_new")
+traitsF <- metadata_F %>% 
+                group_by(Sp_abb_name,Stress)%>%
+                summarise(across(
+      all_of(traitsF),  # Use the vector of column names
+      ~ mean(.x, na.rm = TRUE)))      # Keep original column name and add "_Bac"
+
+traitsF <- traitsF %>% filter(Sp_abb_name %in% phylo_tips) #66 (22 x 3 treatments)
+
+
+#---- Biomass ----
+biomass <- metadata_B %>% 
+                group_by(Sp_abb_name,Stress)%>%
+                summarise(biomass=mean(Shoot_.DryWeight, na.rm=TRUE))
+
+biomass <- biomass %>% filter(Sp_abb_name %in% phylo_tips) #66 (22 x 3 treatments)
+
+#---- Alpha diversity ----
+str(diversity_all$Bac)
+
+alphaB <-  diversity_all$Bac %>% 
+  group_by(Sp_abb_name, Stress, filter) %>%
+  summarise(
+    across(
+      Observed:Fisher,  # Replace with your consecutive columns
+      ~ mean(.x, na.rm = TRUE)))        # Apply mean function ignoring NAs
+                 # Add "_Bac" suffix to the column name
+
+#For now, lets only keep the highFilt
+alphaB <- alphaB %>% filter(filter == "HighFilt")
+
+alphaF <-  diversity_all$Fun %>% 
+  group_by(Sp_abb_name, Stress, filter) %>%
+  summarise(
+    across(
+      Observed:Fisher,  # Replace with your consecutive columns
+      ~ mean(.x, na.rm = TRUE)))        # Apply mean function ignoring NAs
+
+#For now, lets only keep the highFilt
+alphaF <- alphaF %>% filter(filter == "HighFilt")
+       
+#---- Community similarity info (PCoA) ----
+
+pcoa_coordinates_Bac_l
+
+#First I need to calculate the average per sp and stress
+pcoa_Bac <- lapply(pcoa_coordinates_Bac_l, function(df){
+  df <- df %>% 
+    group_by(Sp_abb_name) %>% 
+      summarise(PC1=mean(PC1),
+                PC2=mean(PC2))
+  return(df)
+})
+
+pcoa_Bac$control <- pcoa_Bac$control %>% mutate(Stress="Control")
+pcoa_Bac$MeJA <- pcoa_Bac$MeJA %>% mutate(Stress="MeJA")
+pcoa_Bac$SA <- pcoa_Bac$SA %>% mutate(Stress="SA")
+
+pcoa_Bac <- bind_rows(pcoa_Bac) #ok
+
+#Now the same but for fungi
+pcoa_Fun <- lapply(pcoa_coordinates_Fun_l, function(df){
+  df <- df %>% 
+    group_by(Sp_abb_name) %>% 
+      summarise(PC1=mean(PC1),
+                PC2=mean(PC2))
+  return(df)
+})
+
+pcoa_Fun$control <- pcoa_Fun$control %>% mutate(Stress="Control")
+pcoa_Fun$MeJA <- pcoa_Fun$MeJA %>% mutate(Stress="MeJA")
+pcoa_Fun$SA <- pcoa_Fun$SA %>% mutate(Stress="SA")
+
+pcoa_Fun <- bind_rows(pcoa_Fun) #ok
+
+
+#---- Full Bac ----
+#traitsB, biomass, alphaB, pcoa_Bac
+
+Bac <- biomass %>%
+  inner_join(traitsB, by = c("Sp_abb_name", "Stress")) %>%
+  inner_join(alphaB, by = c("Sp_abb_name", "Stress"))%>%
+  inner_join(pcoa_Bac, by = c("Sp_abb_name", "Stress"))%>%
+  as.data.frame()
+
+#Bac <- full_join(Bac, Cohen4, by = c("Sp_abb_name", "Stress")) #works
+
+#let's only keep those that we are interested now (16/12/2024):
+traits_albouheif <- c("Sp_abb_name","Stress","biomass","PC1", "PC2", "Observed",
+                      "Shannon", "library_size_new")
+
+Bac <- Bac %>% select(all_of(traits_albouheif))
+
+#rename
+Bac <- Bac %>%
+  rename_with(~ paste0(., "_Bac"), PC1:library_size_new)
+
+#split by stress
+#Bac_l <- split(Bac, Bac$Stress)
+
+
+```
+
+Now for Fungi
+```{r}
+#---- Full Fun ----
+#traitsF, alphaF, pcoa_Fun
+
+Fun <- traitsF %>%
+  inner_join(alphaF, by = c("Sp_abb_name", "Stress")) %>%
+  inner_join(pcoa_Fun, by = c("Sp_abb_name", "Stress"))%>%
+  as.data.frame()
+
+#let's only keep those that we are interested now (16/12/2024):
+traits_albouheif <- c("Sp_abb_name","Stress", "PC1", "PC2", "Observed",
+                      "Shannon", "library_size_new")
+
+#let's delete columns that we don't need 
+Fun <- Fun %>% select(all_of(traits_albouheif))
+
+#let's add a Fun sufix to PC1:library_size_new
+Fun <- Fun %>%
+  rename_with(~ paste0(., "_Fun"), PC1:library_size_new)
+
+#let's join both df 
+Full_df <- left_join(Bac, Fun)
+
+#split by stress
+Full_df_l <- split(Full_df, Full_df$Stress)
+
+#clean
+rm(CSS_BacFun_rhizoplane_HighFilt_ps_l) #too large, no needed now
+
+```
+
+Fix df's
+```{r}
+
+#First, modify df's by removing columns and using rownames as species names so it matches with the phylo tree
+#Bac_l <- lapply(Bac_l, function(df){
+#          rownames(df) <- NULL
+#          rownames(df) <- df$Sp_abb_name
+#          df <- df[, !names(df) %in% c("Sp_abb_name", "Stress")]
+ #         return(df)})
+
+Full_df_l <- lapply(Full_df_l , function(df){
+          rownames(df) <- NULL
+          rownames(df) <- df$Sp_abb_name
+          df <- df[, !names(df) %in% c("Sp_abb_name", "Stress")]
+          return(df)})
+  
+
+#Bac_l$Control <- Bac_l$Control[, !names(Bac_l$Control) %in% "cohens"] #remove last column of cohens that is all NAs in controls
+
+#check
+Full_df_l #ok
+
+#let's order the species by how they are in the phylogenetic tree just in case
+order_tree <- Bra_tree$tip.label
+Full_df_l <- lapply(Full_df_l, function(df){
+  df <- df[order(match(rownames(df), order_tree)),]
+  return(df)
+}) #ok
+
+```
+
+
+# Phylogenetic signal (per stress)
+
+##Abouheif's Cmean
+
+```{r}
+
+#let's make a function to get a df out of abouheif.moran() result to avoid repeating code 
+abouheif_result_to_df <- function(abouheif_result, data_from = ""){
+  df <- data.frame(
+  #Method = "Abouheif",              # Name of the method
+  Trait = abouheif_result$names,      # Name of the trait 
+  Cmean = abouheif_result$obs,      # Observed Cmean value
+  P_value = abouheif_result$pvalue, # P-value
+  Stress = data_from
+)
+  return(df)
+}
+
+```
+
+```{r}
+
+#[DEPRECATED 17-12-24]let's use phylosignal package that calculates all of them at once
+#let's use the abouheif.moran() function so it's reproducible with Pedro's results
+set.seed(12345)
+
+#---- Control ----
+pd4_control <- phylo4d(Bra_tree, Full_df_l$Control)
+#df_controlB <- phyloSignal(p4d = pd4_controlB, method = "all")
+control <- abouheif.moran(pd4_control, method = "oriAbouheif", nrepet = 9999)
+df_control <- abouheif_result_to_df(control, "Control")
+#df_controlB <- lapply(df_controlB, function(df){ df %>% mutate(Stress="Control")})
+
+#---- MeJA ----
+pd4_MeJA <- phylo4d(Bra_tree, Full_df_l$MeJA)
+MeJA <- abouheif.moran(pd4_MeJA, method = "oriAbouheif", nrepet = 9999)
+df_MeJA <- abouheif_result_to_df(MeJA, "MeJA")
+
+#---- SA----
+pd4_SA <- phylo4d(Bra_tree, Full_df_l$SA)
+SA <- abouheif.moran(pd4_SA, method = "oriAbouheif", nrepet = 9999)
+df_SA <- abouheif_result_to_df(SA, "SA")
+
+
+```
+
+make a single df, for now it says 'Bac' but its actually both Bac and Fun together
+```{r}
+
+#make it a single df 
+abouheif_full <- rbind(df_control, df_MeJA, df_SA) 
+
+#re-order
+abouheif_full$Trait <- factor(abouheif_full$Trait, levels = c("biomass", "PC1_Bac", "PC2_Bac",
+                                                                    "Observed_Bac", "Shannon_Bac",
+                                                                    "library_size_new_Bac",
+                                                                    "PC1_Fun", "PC2_Fun","Observed_Fun",
+                                                                    "Shannon_Fun",
+                                                                    "library_size_new_Fun"))
+
+#save full df 
+saveRDS(abouheif_full, "./14_Phylogenetic_distance/results/New_S7Fig_Abouheif_18-02/abouheif_full.rds")
+
+#select only those for new S7 figure (18-02-2025)
+selected_traits <- c("PC1_Bac", "PC2_Bac", "Observed_Bac", "Shannon_Bac", "PC1_Fun", "PC2_Fun",
+                     "Observed_Fun", "Shannon_Fun")
+
+abuoheif_full_selection <- abouheif_full %>% filter(Trait %in% selected_traits) 
+
+```
+
+
+##Plot
+
+```{r}
+
+abouheif_full$Trait  <- factor(abouheif_full$Trait , levels=rev(levels(abouheif_full$Trait))) #reverse order for plot 
+
+#make an extra column if P value is significant
+abouheif_full$signif <- ifelse(abouheif_full$P_value < 0.05, "*", "")
+
+#---- Abouheif's ---- 
+p.abouheif <- ggplot(data= abouheif_full,
+       mapping = aes(x = Trait, y = Cmean, fill=Stress))+
+    geom_bar(stat='identity', position = "dodge")+
+    scale_fill_manual(values=c('#999999','#E69F00', '#009E73'))+
+    geom_hline(aes(yintercept=0), linetype="solid") +
+    coord_flip()+
+    facet_wrap(~Stress, ncol=3)+
+     geom_text(aes(label = signif, y = Cmean + 0.02), # Position above bars
+              color = "black", size = 8, vjust = 0.7)+
+  labs(y="Abouheif's Cmean")+
+   axis_looks+
+  theme(legend.position = "none") 
+   
+
+#save plot
+mapply(function(x)
+  ggsave(
+  plot = p.abouheif,
+  filename =x,
+  path = "./14_Phylogenetic_distance/results/plots_abouheif_16-12",
+  scale = 2,
+  width = 1500,
+  height = 700,
+  units = "px",
+  dpi = 300),
+x=c("Traits_abouheif_abouheif.moran-function.pdf",
+    "Traits_abouheif_abouheif.moran-function.png",
+    "Traits_abouheif_abouheif.moran-function.svg"))
+
+```
+
+
+# Phylogenetic signal (without spliting first)
+
+Let's test whether the value changes if you use as input a matrix in which the 3 treatments were included from the beggingin (in the previous case, the ps object was first split by stress, Bray curtis distances calculated and then 3 independent PCoA plots were made). In this case the ps object was not split by stress to calculate the Bray curtis distances and to make the PCoAs where the coordenates come from [as we think Pedro did for his S7 figure]
+
+##Load new data
+```{r}
+
+load("./14_Phylogenetic_distance/r_objects/pcoa_coordinates_l.RData") #new matrix given by Zulema 17-12
+pcoa_coordinates_l #Bac and Fun
+
+#let's first get it split by stress
+pcoa_Bac2_df <- pcoa_coordinates_l$Bac
+pcoa_Bac2_l <- split(pcoa_Bac2_df, pcoa_Bac2_df$Stress)
+
+#---- Community similarity info (PCoA) [full community first] ----
+
+pcoa_Bac2_l
+
+#First I need to calculate the average per sp and stress
+pcoa_Bac2 <- lapply(pcoa_Bac2_l, function(df){
+  df <- df %>% 
+    group_by(Sp_abb_name) %>% 
+      summarise(PC1=mean(PC1),
+                PC2=mean(PC2))
+  return(df)
+})
+
+pcoa_Bac2$Control <- pcoa_Bac2$Control %>% mutate(Stress="Control")
+pcoa_Bac2$MeJA <- pcoa_Bac2$MeJA %>% mutate(Stress="MeJA")
+pcoa_Bac2$SA <- pcoa_Bac2$SA %>% mutate(Stress="SA")
+
+pcoa_Bac2 <- bind_rows(pcoa_Bac2) #ok
+colnames(pcoa_Bac2) <- c("Sp_abb_name", "PC1_Bac_full" ,  "PC2_Bac_full", "Stress")
+
+#Now the same but for fungi
+
+#let's first get it split by stress
+pcoa_Fun2_df <- pcoa_coordinates_l$Fun
+pcoa_Fun2_l <- split(pcoa_Fun2_df, pcoa_Fun2_df$Stress)
+
+pcoa_Fun2 <- lapply(pcoa_Fun2_l , function(df){
+  df <- df %>% 
+    group_by(Sp_abb_name) %>% 
+      summarise(PC1=mean(PC1),
+                PC2=mean(PC2))
+  return(df)
+})
+
+pcoa_Fun2$Control <- pcoa_Fun2$Control %>% mutate(Stress="Control")
+pcoa_Fun2$MeJA <- pcoa_Fun2$MeJA %>% mutate(Stress="MeJA")
+pcoa_Fun2$SA <- pcoa_Fun2$SA %>% mutate(Stress="SA")
+
+pcoa_Fun2 <- bind_rows(pcoa_Fun2) #ok
+colnames(pcoa_Fun2) <- c("Sp_abb_name", "PC1_Fun_full" ,  "PC2_Fun_full", "Stress")
+
+
+```
+
+Let's merge it with the previous Bac and Fun df 
+```{r}
+Bac
+Fun
+
+Bac2 <- Bac %>%
+  inner_join(pcoa_Bac2, by = c("Sp_abb_name", "Stress")) %>%
+  as.data.frame()
+
+Fun2 <- Fun %>% 
+        inner_join(pcoa_Fun2, by = c("Sp_abb_name", "Stress")) %>%
+        as.data.frame()
+
+
+#let's join both df 
+Full_df2 <- left_join(Bac2, Fun2)
+
+#split by stress
+Full_df_l2 <- split(Full_df2, Full_df2$Stress)
+
+#let's arrange the df so it works with the function
+Full_df_l2 <- lapply(Full_df_l2 , function(df){
+          rownames(df) <- NULL
+          rownames(df) <- df$Sp_abb_name
+          df <- df[, !names(df) %in% c("Sp_abb_name", "Stress")]
+          return(df)})
+
+#check
+Full_df_l2 #ok
+
+#let's order the species by how they are in the phylogenetic tree just in case
+order_tree <- Bra_tree$tip.label
+Full_df_l2 <- lapply(Full_df_l2, function(df){
+  df <- df[order(match(rownames(df), order_tree)),]
+  return(df)
+}) #ok
+
+```
+
+
+##Abouheif's Cmean
+```{r}
+
+set.seed(12345)
+
+#---- Control ----
+pd4_control2 <- phylo4d(Bra_tree, Full_df_l2$Control)
+control2 <- abouheif.moran(pd4_control2, method = "oriAbouheif", nrepet = 9999)
+df_control2 <- abouheif_result_to_df(control2, "Control")
+
+#---- MeJA ----
+pd4_MeJA2 <- phylo4d(Bra_tree, Full_df_l2$MeJA)
+MeJA2 <- abouheif.moran(pd4_MeJA2, method = "oriAbouheif", nrepet = 9999)
+df_MeJA2 <- abouheif_result_to_df(MeJA2, "MeJA")
+
+#---- SA----
+pd4_SA2 <- phylo4d(Bra_tree, Full_df_l2$SA)
+SA2 <- abouheif.moran(pd4_SA2, method = "oriAbouheif", nrepet = 9999)
+df_SA2 <- abouheif_result_to_df(SA2, "SA")
+
+```
+
+##Plot
+
+```{r}
+#make it a single df 
+abouheif_full2 <- rbind(df_control2, df_MeJA2, df_SA2) 
+
+```
+
+
+##Plot
+
+```{r}
+
+PC_comparison <- c("PC1_Bac", "PC1_Bac_full", "PC2_Bac", "PC2_Bac_full",
+                   "PC1_Fun", "PC1_Fun_full","PC2_Fun", "PC2_Fun_full")
+
+#select only PC values for new plot
+abouheif_full2_PC <- abouheif_full2 %>% filter(Trait %in% PC_comparison) %>% droplevels()
+
+#order them
+abouheif_full2_PC$Trait <- factor(abouheif_full2_PC$Trait, levels=PC_comparison)
+
+#reverse order for plot 
+abouheif_full2_PC$Trait  <- factor(abouheif_full2_PC$Trait , levels=rev(levels(abouheif_full2_PC$Trait))) 
+
+#make an extra column if P value is significant
+abouheif_full2_PC$signif <- ifelse(abouheif_full2_PC$P_value < 0.05, "*", "")
+
+#---- Abouheif's ---- 
+p.abouheif2 <- ggplot(data= abouheif_full2_PC,
+       mapping = aes(x = Trait, y = Cmean, fill=Stress))+
+    geom_bar(stat='identity', position = "dodge")+
+    scale_fill_manual(values=c('#999999','#E69F00', '#009E73'))+
+    geom_hline(aes(yintercept=0), linetype="solid") +
+    coord_flip()+
+    facet_wrap(~Stress, ncol=3)+
+     geom_text(aes(label = signif, y = Cmean + 0.02), # Position above bars
+              color = "black", size = 8, vjust = 0.7)+
+  labs(y="Abouheif's Cmean")+
+   axis_looks+
+  theme(legend.position = "none") 
+   
+
+#save plot
+mapply(function(x)
+  ggsave(
+  plot = p.abouheif2,
+  filename =x,
+  path = "./14_Phylogenetic_distance/results/plots_abouheif_16-12",
+  scale = 2,
+  width = 1500,
+  height = 700,
+  units = "px",
+  dpi = 300),
+x=c("Traits_abouheif_abouheif.moran-function_comparisonSplitvsFull.pdf",
+    "Traits_abouheif_abouheif.moran-function_comparisonSplitvsFull.png",
+    "Traits_abouheif_abouheif.moran-function_comparisonSplitvsFull.svg"))
+
+```
+
+
+#Table with libsize[NEW with unnormalized]
+
+Let's also get a table with libsize per species 
+```{r}
+
+#First, load the unnormalized ps object with the HighFilter of Chrats applied.
+load("C:/RProjects/Family/Data/phyloseq_objects/unnormalized_BacFun_rhizoplane_HighFilt_ps_l.RData")
+
+unnormalized_BacFun_rhizoplane_HighFilt_ps_l
+
+#First add library size 
+library_size_new <- sample_sums(unnormalized_BacFun_rhizoplane_HighFilt_ps_l$Bac)
+sample_data(unnormalized_BacFun_rhizoplane_HighFilt_ps_l$Bac)$library_size_new <- library_size_new
+
+library_size_newF <- sample_sums(unnormalized_BacFun_rhizoplane_HighFilt_ps_l$Fun)
+sample_data(unnormalized_BacFun_rhizoplane_HighFilt_ps_l$Fun)$library_size_new <- library_size_newF
+
+
+#now get new df 
+metadata_B <- data.frame(sample_data(unnormalized_BacFun_rhizoplane_HighFilt_ps_l$Bac))
+metadata_F <- data.frame(sample_data(unnormalized_BacFun_rhizoplane_HighFilt_ps_l$Fun))
+
+
+#first let's go back to get libsize from all species so we can also calculate SD and SE for Fungi
+
+traitsF <- c("library_size_new")
+libsizeF <- metadata_F %>% 
+                group_by(Sp_abb_name)%>%
+                summarise(across(
+      all_of(traitsF),  # Use the vector of column names
+      list(
+      mean = ~ mean(.x, na.rm = TRUE),
+      sd = ~ sd(.x, na.rm=TRUE),
+      se= ~sd(.x, na.rm=TRUE) / sqrt(sum(!is.na(.x)))
+      ),
+      .names = "{.col}_{.fn}"),
+      n=n(),
+      .groups= "drop")%>% 
+    mutate(community="Fun")
+
+libsizeF  <- libsizeF  %>% filter(Sp_abb_name %in% phylo_tips) #(22 species)
+colnames(libsizeF) <- c("Sp_abb_name","mean", "SD","se","N","community")
+
+#Now for bacteria
+libsizeB <- metadata_B %>% 
+                group_by(Sp_abb_name)%>%
+                summarise(across(
+      all_of(traitsF),  # Use the vector of column names
+      list(
+      mean = ~ mean(.x, na.rm = TRUE),
+      sd = ~ sd(.x, na.rm=TRUE),
+      se= ~sd(.x, na.rm=TRUE) / sqrt(sum(!is.na(.x)))
+      ),
+      .names = "{.col}_{.fn}"),
+      n=n(),
+      .groups= "drop")%>% 
+    mutate(community="Bac")
+
+libsizeB  <- libsizeB  %>% filter(Sp_abb_name %in% phylo_tips) #(22 species)
+colnames(libsizeB) <- c("Sp_abb_name","mean", "SD","se","N","community")
+
+
+#Now let's put it into table format
+
+# Combine mean and SD into "mean ± SD" format
+table_with_mean_sd <- libsizeB %>%
+  mutate(libzise_Bac = sprintf("%.1f ± %.1f", mean, SD)) %>%
+  mutate(N_Bac=N) %>% 
+  select(Sp_abb_name, libzise_Bac, N_Bac)
+
+table_with_mean_sdF <- libsizeF %>%
+  mutate(libzise_Fun = sprintf("%.1f ± %.1f", mean, SD)) %>%
+  mutate(N_Fun=N) %>% 
+  select(Sp_abb_name, libzise_Fun, N_Fun)
+
+#make it into a single df 
+final_table_libsize <- left_join(table_with_mean_sd, table_with_mean_sdF)
+
+#re-order as in phylogeny
+final_table_libsize <- final_table_libsize %>% 
+                        mutate(Sp_abb_name= factor(Sp_abb_name, levels=phylo_tips)) %>% 
+                        arrange(Sp_abb_name)
+
+#save it into a word file 
+library(rempsyc)
+table <- nice_table(final_table_libsize ,
+              title = c("Table X. Library size +/- SD for both Bac and Fun"))
+flextable::save_as_docx(table,
+                        path = "./18_Sequencing_depth/results/LibrarySize_BySpecies_unnormalized.docx")
+
+#save it as .csv file
+write.csv(final_table_libsize, "./18_Sequencing_depth/results/LibrarySize_BySpecies_unnormalized.csv", row.names = FALSE)
+
+```
+
+
+#Table with libsize[OLD with CSS ps]
+
+Let's also get a table with libsize per species 
+```{r}
+#first let's go back to get libsize from all species so we can also calculate SD and SE
+
+traitsF <- c("library_size_new")
+libsizeF <- metadata_F %>% 
+                group_by(Sp_abb_name)%>%
+                summarise(across(
+      all_of(traitsF),  # Use the vector of column names
+      list(
+      mean = ~ mean(.x, na.rm = TRUE),
+      sd = ~ sd(.x, na.rm=TRUE),
+      se= ~sd(.x, na.rm=TRUE) / sqrt(sum(!is.na(.x)))
+      ),
+      .names = "{.col}_{.fn}"),
+      n=n(),
+      .groups= "drop")%>% 
+    mutate(community="Fun")
+
+libsizeF  <- libsizeF  %>% filter(Sp_abb_name %in% phylo_tips) #(22 species)
+colnames(libsizeF) <- c("Sp_abb_name","mean", "SD","se","N","community")
+
+#Now for bacteria
+libsizeB <- metadata_B %>% 
+                group_by(Sp_abb_name)%>%
+                summarise(across(
+      all_of(traitsF),  # Use the vector of column names
+      list(
+      mean = ~ mean(.x, na.rm = TRUE),
+      sd = ~ sd(.x, na.rm=TRUE),
+      se= ~sd(.x, na.rm=TRUE) / sqrt(sum(!is.na(.x)))
+      ),
+      .names = "{.col}_{.fn}"),
+      n=n(),
+      .groups= "drop")%>% 
+    mutate(community="Bac")
+
+libsizeB  <- libsizeB  %>% filter(Sp_abb_name %in% phylo_tips) #(22 species)
+colnames(libsizeB) <- c("Sp_abb_name","mean", "SD","se","N","community")
+
+
+#Now let's put it into table format
+
+# Combine mean and SD into "mean ± SD" format
+table_with_mean_sd <- libsizeB %>%
+  mutate(libzise_Bac = sprintf("%.1f ± %.1f", mean, SD)) %>%
+  mutate(N_Bac=N) %>% 
+  select(Sp_abb_name, libzise_Bac, N_Bac)
+
+table_with_mean_sdF <- libsizeF %>%
+  mutate(libzise_Fun = sprintf("%.1f ± %.1f", mean, SD)) %>%
+  mutate(N_Fun=N) %>% 
+  select(Sp_abb_name, libzise_Fun, N_Fun)
+
+#make it into a single df 
+final_table_libsize <- left_join(table_with_mean_sd, table_with_mean_sdF)
+
+#re-order as in phylogeny
+final_table_libsize <- final_table_libsize %>% 
+                        mutate(Sp_abb_name= factor(Sp_abb_name, levels=phylo_tips)) %>% 
+                        arrange(Sp_abb_name)
+
+#save it into a word file 
+library(rempsyc)
+table <- nice_table(final_table_libsize ,
+              title = c("Table X. Library size +/- SD for both Bac and Fun"))
+flextable::save_as_docx(table,
+                        path = "./18_Sequencing_depth/results/LibrarySize_BySpecies.docx")
+
+#save it as .csv file
+write.csv(final_table_libsize, "./18_Sequencing_depth/results/LibrarySize_BySpecies.csv", row.names = FALSE)
+
+```
+
+```{r}
+unnormalized_BacFun_rhizoplane_HighFilt_ps_l
+
+MY_tree
+
+ps <- lapply(unnormalized_BacFun_rhizoplane_HighFilt_ps_l, function(ps){
+  ps <-subset_samples(ps, Sp_abb_name %in% MY_tree)
+  ps <- prune_taxa(taxa_sums(ps) > 0, ps)
+  print(mean(sample_sums(ps)))
+  return(ps)
+})
+
+
+
+```
+
+
+
+#[DELETE]
+## Fun
+```{r}
+
+#---- Fun ---- 
+indexes_full_Fun$Trait <- factor(indexes_full_Fun$Trait, levels = c("PC1", "PC2",
+                                                                    "Observed", "Chao1", "Shannon", "Simpson", "InvSimpson", "ACE", "Fisher",
+                                                                    "library_size_new", "Amplicon_concentation_ngul"))
+
+indexes_full_Fun$Trait <- factor(indexes_full_Fun$Trait, levels=rev(levels(indexes_full_Fun$Trait))) #reverse order for plot 
+
+#plot index values  
+
+#---- Abouheif's ---- 
+p.abouheif_F <- ggplot(data= subset(indexes_full_Fun, index %in% "Cmean"),
+       mapping = aes(x = Trait, y = index_value, fill=Stress))+
+    geom_bar(stat='identity', position = "dodge")+
+    scale_fill_manual(values=c('#999999','#E69F00', '#009E73'))+
+    geom_hline(aes(yintercept=0), linetype="solid") +
+    coord_flip()+
+    facet_wrap(~Stress, ncol=3)+
+     geom_text(data = subset(indexes_full_Fun, index %in% "Cmean" & p_value < 0.05),
+              aes(label = "*", y = index_value+0.02),  # Position above bars
+              color = "black", size = 8, vjust = 0.7)+
+  labs(y="Abouheif's Cmean")+
+  axis_looks+
+  theme(legend.position = "none") 
+
+
+#save plot
+mapply(function(x)
+  ggsave(
+  plot = p.abouheif_F,
+  filename =x,
+  path = "./14_Phylogenetic_distance/results/plots_phylosignal_19-11",
+  scale = 2,
+  width = 1500,
+  height = 700,
+  units = "px",
+  dpi = 300),
+x=c("Fun_abouheif.pdf",
+    "Fun_abouheif.png"))
+
+#---- Moran's I ---- 
+
+p.moran_F <- ggplot(data= subset(indexes_full_Fun, index %in% "I"),
+       mapping = aes(x = Trait, y = index_value, fill=Stress))+
+    geom_bar(stat='identity', position = "dodge")+
+    scale_fill_manual(values=c('#999999','#E69F00', '#009E73'))+
+    geom_hline(aes(yintercept=0), linetype="solid") +
+    coord_flip()+
+    facet_wrap(~Stress, ncol=3)+
+     geom_text(data = subset(indexes_full_Fun, index %in% "I" & p_value < 0.05),
+              aes(label = "*", y = index_value+0.006),  # Position above bars
+              color = "black", size = 8, vjust = 0.8)+
+  labs(y="Moran's I")+
+    axis_looks+
+  theme(legend.position = "none") +
+  theme(axis.title.y = element_blank(),  # Remove x-axis title
+        axis.text.y = element_blank(),   # Remove x-axis text
+        axis.ticks.y = element_blank()) # Remove x-axis ticks
+
+#save plot
+mapply(function(x)
+  ggsave(
+  plot = p.moran_F,
+  filename =x,
+  path = "./14_Phylogenetic_distance/results/plots_phylosignal_19-11",
+  scale = 2,
+  width = 1500,
+  height = 700,
+  units = "px",
+  dpi = 300),
+x=c("Fun_moran.pdf",
+    "Fun_moran.png"))
+
+#---- Pagel's Lambda ---- 
+p.lambda_F <- ggplot(data= subset(indexes_full_Fun, index %in% "Lambda"),
+       mapping = aes(x = Trait, y = index_value, fill=Stress))+
+    geom_bar(stat='identity', position = "dodge")+
+    scale_fill_manual(values=c('#999999','#E69F00', '#009E73'))+
+    geom_hline(aes(yintercept=0), linetype="solid") +
+    coord_flip()+
+    facet_wrap(~Stress, ncol=3)+
+     geom_text(data = subset(indexes_full_Fun, index %in% "Lambda" & p_value < 0.05),
+              aes(label = "*", y = index_value+0.006),  # Position above bars
+              color = "black", size = 8, vjust = 0.8)+
+  labs(y="Pagel's lambda")+
+    axis_looks+
+  theme(legend.position = "none") +
+    theme(axis.title.y = element_blank(),  # Remove x-axis title
+        axis.text.y = element_blank(),   # Remove x-axis text
+        axis.ticks.y = element_blank()) # Remove x-axis ticks
+
+#save plot
+mapply(function(x)
+  ggsave(
+  plot = p.lambda_F,
+  filename =x,
+  path = "./14_Phylogenetic_distance/results/plots_phylosignal_19-11",
+  scale = 2,
+  width = 1500,
+  height = 700,
+  units = "px",
+  dpi = 300),
+x=c("Fun_lambda.pdf",
+    "Fun_lambda.png"))
+
+
+#---- Bloomberg's K ---- 
+
+p.bloomberg_F <- ggplot(data= subset(indexes_full_Fun, index %in% "K"),
+       mapping = aes(x = Trait, y = index_value, fill=Stress))+
+    geom_bar(stat='identity', position = "dodge")+
+    scale_fill_manual(values=c('#999999','#E69F00', '#009E73'))+
+    geom_hline(aes(yintercept=0), linetype="solid") +
+    coord_flip()+
+    facet_wrap(~Stress, ncol=3)+
+     geom_text(data = subset(indexes_full_Fun, index %in% "K" & p_value < 0.05),
+              aes(label = "*", y = index_value+0.006),  # Position above bars
+              color = "black", size = 8, vjust = 0.8)+
+  labs(y="Bloomberg's K")+
+    axis_looks+
+    theme(axis.title.y = element_blank(),  # Remove x-axis title
+        axis.text.y = element_blank(),   # Remove x-axis text
+        axis.ticks.y = element_blank()) # Remove x-axis ticks
+
+#save plot
+mapply(function(x)
+  ggsave(
+  plot = p.bloomberg_F,
+  filename =x,
+  path = "./14_Phylogenetic_distance/results/plots_phylosignal_19-11",
+  scale = 2,
+  width = 1500,
+  height = 700,
+  units = "px",
+  dpi = 300),
+x=c("Fun_bloomberg.pdf",
+    "Fun_bloomberg.png"))
+
+#single plot
+#go Funk and add no legend in y axis and no legend of colors 
+full.p_F <- (p.abouheif_F | p.moran_F | p.lambda_F | p.bloomberg_F)
+
+#save plot
+mapply(function(x)
+  ggsave(
+  plot = full.p,
+  filename =x,
+  path = "./14_Phylogenetic_distance/results/plots_phylosignal_19-11",
+  scale = 4,
+  width = 1500,
+  height = 500,
+  units = "px",
+  dpi = 300),
+x=c("Fun_all_indexes.pdf",
+    "Fun_all_indexes.png"))
+
+```
+
+# small df for Zulema
+```{r}
+
+indexes_full_Fun
+indexes_full_Bac
+
+PC1_Bac <- subset(indexes_full_Bac, Trait %in% "PC1")
+PC1_Fun <- subset(indexes_full_Fun, Trait %in% "PC1")
+
+index_values_PC1_l <- list(Bac=PC1_Bac, Fun=PC1_Fun)
+
+saveRDS(index_values_PC1_l, file="./14_Phylogenetic_distance/results/index_values_PC1_l.rds")
+
+```
+
+#Mantel test
+```{r}
+
+#---- load ps object ----
+load("./Data/phyloseq_objects/CSS_BacFun_rhizoplane_HighFilt_ps_l.RData")
+
+#keep only those in the tree
+# we will select only the Brassica samples from the million year tree
+#define species present in the MY tree
+MY_tree <- c("At", "Al", "Cas", "Tg", "Ec", "Mm", "Bv",
+                "Lr", "Ds", "Bi", "Bn", "Sar", "Hi", "Br", "Bo_M", 
+                "Dt", "Si", "It", "Co", "Lm", "Ia", "Es")
+
+#check sample data info
+head(sample_data(CSS_BacFun_rhizoplane_HighFilt_ps_l$Bac)) #already has MY presence
+head(sample_data(CSS_BacFun_rhizoplane_HighFilt_ps_l$Fun)) #already has MY presence 
+
+
+#now keep only those inside MY tree
+CSS_BacFun_rhizoplane_HighFilt_ps_l$Bac <- subset_samples(CSS_BacFun_rhizoplane_HighFilt_ps_l$Bac,
+                                                          MY_tree_presence == "inside_MY_tree")
+CSS_BacFun_rhizoplane_HighFilt_ps_l$Fun <- subset_samples(CSS_BacFun_rhizoplane_HighFilt_ps_l$Fun,
+                                                          MY_tree_presence == "inside_MY_tree")
+
+#remove remaining ASVs with zero reads
+CSS_BacFun_rhizoplane_HighFilt_ps_l <- lapply(CSS_BacFun_rhizoplane_HighFilt_ps_l, function(ps){
+  prune_taxa(taxa_sums(ps) >0, ps)})
+
+
+```
+
+```{r}
+Bra_tree
+phylo_tips
+
+#calculate plant distance
+phylo_dist <- cophenetic(Bra_tree)
+
+#calculate microbiome distance
+otu_table <- lapply(CSS_BacFun_rhizoplane_HighFilt_ps_l, function(ps){
+                    otu_table <-otu_table(ps)
+                    otu_table <- t(otu_table)})
+
+microbiome_dist <- lapply(otu_table, function(x){
+                  microbiome_dist <- vegdist(x, method = "bray")})
+
+#save
+save(microbiome_dist, file="./14_Phylogenetic_distance/results/Results_Dec2024_mantel/BacFun_dist_Bray.Rdata")
+
+```
+
+```{r}
+
+#load data
+load(file="./14_Phylogenetic_distance/results/Results_Dec2024_mantel/BacFun_dist_Bray.Rdata")
+
+
+#Prepare matrix for mantel test using Roland's function (adapted)
+#which takes distance within species as well (diagonal is not 0)
+distance_to_Mantel <- function(dist, ps){
+  
+  #dist <- microbiome_dist$Bac
+  #dist <- dist.bray$Control
+  
+  #This function takes a distance object and makes it a distance matrix ready
+  
+  # change object to matrix
+  dist <- as.matrix(dist)
+  
+  # change object to data frame
+  dist <- as.data.frame(dist)
+  
+  # row names to column "sample1"
+  dist <- tibble::rownames_to_column(dist, "sample1")
+  
+  # transform wide to long
+  dist <- dist %>% pivot_longer(cols=colnames(dist)[-1],
+                                names_to='sample2',
+                                values_to='distance')
+  
+  ## replace sample names with plant species-stress treatment combination
+  
+  # get simplified metadata table with sample names, species codes and treatments
+  metadata <- sample_data(ps)
+  metadata <- as.matrix(metadata)
+  metadata <- as.data.frame(metadata)
+  metadata$Sp_abb_name[metadata$Sp_abb_name == "Bo_M"] <- 'Bo' #changing this so no problem with the "_" from Bo_M 
+  
+  metadata <- metadata[,c("Sp_abb_name", "Stress")]
+  metadata <- tibble::rownames_to_column(metadata, "sample_ID")  
+  metadata$species_treatment <- paste0(metadata$Sp_abb_name, "_", metadata$Stress)
+  metadata <- metadata[,c("sample_ID", "species_treatment")]
+  
+  # merge dist with metadata
+  dist <- merge(dist, metadata, by.x = "sample1", by.y = "sample_ID")
+  dist$sample1 <- dist$species_treatment
+  dist <- dist[,-4]
+  dist <- merge(dist, metadata, by.x = "sample2", by.y = "sample_ID")
+  dist$sample2 <- dist$species_treatment
+  dist <- dist[,-4]
+  
+  #check how many rows have 0 in pairwise comparison (1,031 data points)
+  nrow(dist[dist$distance == 0,]) #check how many data points
+
+  t <- as.data.frame(with(dist, table(sample1, sample2))) #4,356 pairwise comparisons
+  #lowest has 182 data points and highest has 256 (16*16)
+  
+  # calculate mean distances with the function "summarize"
+  dist <- dist %>%
+    filter(distance != 0) %>% #remove all those that have 0 (self comparison by sample)
+    group_by(sample1, sample2) %>%
+    dplyr::summarize(mean_distance = mean(distance))
+  
+  # [RB NOTE]: there is also a distance of a certain species/treatment combination with itself, which is the average distance between the replicates. we will later exclude the self-comparisons, but it is also good to check how the correlation looks if we include them.
+  
+  # subset by combination of sp and treatment 
+  dist <- separate(data = dist, col = sample1, into = c("species_code_1", "treatment_1"), sep = "_")
+  dist <- separate(data = dist, col = sample2, into = c("species_code_2", "treatment_2"), sep = "_")
+  
+  # subset only rows that have Control for both
+  dist_Control <- subset(dist, (treatment_1 == "Control" & treatment_2 == "Control"))
+  # subset only rows that have MeJA for both
+  dist_MeJA <- subset(dist, (treatment_1 == "MeJA" & treatment_2 == "MeJA"))
+  # subset only rows that have SA for both
+  dist_SA <- subset(dist, (treatment_1 == "SA" & treatment_2 == "SA"))
+  
+  # drop columns "treatment_1" and "treatment_2"
+  dist_Control = subset(dist_Control, select = -c(treatment_1, treatment_2) ) 
+  dist_MeJA = subset(dist_MeJA, select = -c(treatment_1, treatment_2) ) 
+  dist_SA = subset(dist_SA, select = -c(treatment_1, treatment_2)) 
+  
+  # Call function that uses "dist_X", which can then be either "dist_Control" or "dist_MeJA" or "dist_SA"
+  # to make it the final distance matrix (to be used later)
+  
+  format_dist <- function(dist_X){
+    
+    # transform long to wide [MA] important
+    dist_X <- dist_X %>% pivot_wider(names_from="species_code_2",
+                                     values_from="mean_distance")
+    
+    # change to matrix, assign row names
+    dist_X <- as.matrix(dist_X)
+    rownames(dist_X) <- dist_X[,1] # change row 1 to row names
+    dist_X <- dist_X[,-1] # remove the column that contained the row names
+    
+    return(dist_X) #[MA] returns distance matrix
+  }
+  
+  
+  # run the function on the Stress- bray-curtis distance matrices
+  dist_Control <- format_dist(dist_Control)
+  dist_MeJA <- format_dist(dist_MeJA)
+  dist_SA <- format_dist(dist_SA)
+
+  
+  # make it into a list and return it out of the function
+  dist_ByStress_list <- list(dist_Control, dist_MeJA, dist_SA)
+  names(dist_ByStress_list)<-c("Control","MeJA", "SA")
+  
+  #change to numeric
+  numeric_dist_ByStress_list <- lapply(dist_ByStress_list, function(x){
+      class(x) <- "numeric"  
+      return(x)
+  }) 
+  
+  return(numeric_dist_ByStress_list)
+  
+}
+
+```
+
+Run function
+```{r}
+
+matrix.Bac <- distance_to_Mantel(microbiome_dist$Bac, CSS_BacFun_rhizoplane_HighFilt_ps_l$Bac)
+matrix.Fun <- distance_to_Mantel(microbiome_dist$Fun, CSS_BacFun_rhizoplane_HighFilt_ps_l$Fun)
+
+```
+
+Fix names in matrix so it matches 
+```{r}
+
+print(rownames(phylo_dist) == rownames(matrix.Bac$Control)) #not same order
+print(colnames(phylo_dist) == colnames(matrix.Bac$Control))#function to change the order in matrix 
+
+#first, let's change Bo to Bo_M
+rownames(matrix.Bac$Control) <- c("Al", "At", "Bi", "Bn", "Bo_M", "Br", "Bv", "Cas", "Co", "Ds", "Dt", "Ec", "Es", "Hi", "Ia", "It", "Lm", "Lr", "Mm", "Sar", "Si", "Tg")
+colnames(matrix.Bac$Control) <- c("Al", "At", "Bi", "Bn", "Bo_M", "Br", "Bv", "Cas", "Co", "Ds", "Dt", "Ec", "Es", "Hi", "Ia", "It", "Lm", "Lr", "Mm", "Sar", "Si", "Tg")
+
+#Now, let's change phylo_dist order to match matrix.Bac
+
+#reorder matrix
+phylo_dist <- phylo_dist[rownames(matrix.Bac$Control),colnames(matrix.Bac$Control)]
+
+#check
+common_samples <- intersect(rownames(matrix.Bac$Control), rownames(phylo_dist)) #ok
+
+#Run mantel
+mantel_Bac <- lapply(matrix.Bac, function(ps_dist){
+                mantel(ps_dist, phylo_dist, method = "pearson", permutations = 999)})
+
+mantel_Fun <- lapply(matrix.Fun, function(ps_dist){
+                mantel(ps_dist, phylo_dist, method = "pearson", permutations = 999)})
+
+
+#make into a df
+df_Mantel <- function(x){
+  
+ Mantel_R <- as.data.frame(x$statistic) 
+ pvalue <- as.data.frame(x$signif)
+ #Distance <- "Bray-Curtis"
+ Treatment <- deparse(substitute(x)) #gets name of the object as a string character
+ 
+ df <- data.frame(Treatment, Mantel_R, pvalue)
+ 
+ return(df)
+}
+
+#Bacteria
+mantel_Bac_df <- lapply(mantel_Bac, function(mantel){df_Mantel(mantel)})
+mantel_Bac_df <- map_dfr(mantel_Bac_df , ~ ., .id = "ListName")
+mantel_Bac_df <- mantel_Bac_df %>% mutate(community="Bac")
+
+#Fungi
+mantel_Fun_df <- lapply(mantel_Fun, function(mantel){df_Mantel(mantel)})
+mantel_Fun_df <- map_dfr(mantel_Fun_df , ~ ., .id = "ListName")
+mantel_Fun_df <- mantel_Fun_df %>% mutate(community="Fun")
+
+#join df
+mantel_df <- rbind(mantel_Bac_df, mantel_Fun_df)
+
+#save result
+saveRDS(mantel_df, file="./14_Phylogenetic_distance/results/Results_Dec2024_mantel/mantel_df.rds")
+```
+
+
+
+#Plot (later)
+```{r}
+
+plot(as.vector(phylo_dist), as.vector(matrix.Bac$Control),
+     xlab = "Phylogenetic Distance",
+     ylab = "Microbiome Distance",
+     main = "Mantel Test Correlation",
+     pch = 19, col = "blue")
+abline(lm(as.vector(matrix.Bac$Control) ~ as.vector(phylo_dist)), col = "red")
+
+```
+

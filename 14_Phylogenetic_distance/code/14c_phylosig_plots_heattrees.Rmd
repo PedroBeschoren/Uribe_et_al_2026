@@ -1,0 +1,1338 @@
+---
+title: "14c_phylosig_plots_heattrees"
+author: "Pedro_Beschoren"
+date: "20/04/2023"
+output:
+  pdf_document: default
+  html_document: default
+editor_options:
+  chunk_output_type: consolehtml_document
+---
+
+
+# 14.1 - set up working environemnt
+
+
+```{r}
+# this will load all key libraries for the whole project
+source("./renv/0_load_libraries.R")
+library(plyr)
+library("umap")
+library(RColorBrewer)
+library(cowplot) 
+library(multiblock)
+library(data.table)
+library(ggExtra)
+
+# IMPORTANT: load the custom functions necessary to run this script
+source("./14_Phylogenetic_distance/code/custom_functions_PB.R")
+
+
+library(picante)
+library(ape)
+library(adephylo)
+library(ade4)
+library(phylobase)
+library(geiger)
+library(phytools)
+library(vegan)
+library(phyloseq)
+library(dplyr)
+
+
+# increases memory limit used by R
+memory.limit(size = 350000)
+```
+
+# 14.2 - load ps, remove species outside tree 
+
+```{R}
+
+#load the output of the phylogenetic signal pipeline - all taxa in 1 list
+load(file = "./14_Phylogenetic_distance/r_objects/bac_alltaxa_phylosig_output_PCoA_nonsig.RData") 
+
+#load the output of the phylogenetic signal pipeline - one list per taxonomic rank
+load(file = "./14_Phylogenetic_distance/r_objects/per_level_phylosig_PPCA.RData") 
+
+# a df with various metrics of the 528 permanovas
+load(file = "./14_Phylogenetic_distance/r_objects/perm_528_phylosig_pct_df.RData")
+
+# a df with of permanovas filtered absed on various metrics
+load(file = "./14_Phylogenetic_distance/r_objects/filtered_permavonas.RData")
+
+#load output of mantel pipeline
+load(file = "./14_Phylogenetic_distance/r_objects/bac_alltaxa_mantel_pipeline_df.RData")
+
+# load hundreds of PCoA plots
+load(file = "./14_Phylogenetic_distance/r_objects/PCoA_528_plots_axis_pct.RData") # one per tax group
+load(file = "./14_Phylogenetic_distance/r_objects/PCoA_528_3x_plots_axis_pct.RData") # one per tax group and per stress
+
+# load PS data
+load("./Data/phyloseq_objects/CSS_BacFun_rhizoplane_HighFilt_ps_l.RData")
+
+# remove all species outside the MY trees
+CSS_BacFun_rhizoplane_HighFilt_ps_l <- 
+  lapply(CSS_BacFun_rhizoplane_HighFilt_ps_l, function(x) 
+    subset_samples(x, MY_tree_presence == "inside_MY_tree"))
+
+
+
+```
+
+#### ####################
+## ## Trait_on_tree plots ##
+#### ####################
+
+# Trait_on_tree plot: heatmap of PCoA coodinaties per plant species
+
+This is the basis of the main figures for the paper.
+All plots only contains the taxonomic groups that passed permanova/PCOA filtering
+
+## plot brassicaceae phylogeny tree, export as pdf
+
+
+```{r}
+#load tree
+Bra_tree_for_plot<-load_prepare_MY_tree()
+
+#save tree plot
+ pdf(file = "./14_Phylogenetic_distance/results/Results_April2023/bra_tree_hendriks.pdf",
+     width = 4, 
+     height = 6) 
+ 
+ #plot
+ plot(Bra_tree_for_plot)
+  dev.off()
+
+  
+  
+  
+
+```
+
+
+## Trait_on_tree: prepare df for heatmap
+
+```{r}
+
+# create df with PCoA coordinates for a heatmap plot
+re_created_traitontree<-
+lapply(bac_alltaxa_phylosig_output_PCoA_nonsig$ordination_coordinates_l, function(x){
+  
+  
+  #extract emtadata
+  metadata<-as(x@sam_data, "data.frame")
+  
+  #add extended lineage  
+  metadata$Sp_Lineage_Walden_extended<-  
+        if_else(condition = metadata$Sp_abb_name %in% c("Ia", "Lm", "Co", "Bi"), 
+              true ="lineage_II_extended",
+              false =  metadata$Sp_Lineage_Walden)
+        
+        
+        
+  
+  #split by stress
+  metadata_split<-split(metadata, f = metadata$Stress)
+  
+
+  #calcualte centroid
+centroid_l<-
+  lapply(metadata_split, function(z){
+    
+    #calculate centroid
+    centroid <- aggregate(cbind(PCoA_1, PCoA_2) ~ Sp_abb_name, data = z, FUN = mean)
+
+    #if Sar is positive on the PC1, rotate the axis by multiplying it by -1
+    if(filter(centroid,Sp_abb_name == "Sar")$PCoA_1>0) {
+       centroid$PCoA_1<-centroid$PCoA_1*-1 
+    }
+    
+    #if Sar is positive on the PC2, rotate the axis by multiplying it by -1
+    if(filter(centroid,Sp_abb_name == "Sar")$PCoA_2>0) {
+       centroid$PCoA_2<-centroid$PCoA_2*-1 
+    }
+
+
+    #scale and centr PCoA1 and 2
+    centroid$PCoA_1_centroid_scaled<-scale(centroid$PCoA_1,center = TRUE, scale = TRUE)
+    centroid$PCoA_2_centroid_scaled<-scale(centroid$PCoA_2,center = TRUE, scale = TRUE)
+    
+    return(centroid)
+  })
+
+# extract per-species metadata
+unique_meta_l<-lapply(metadata_split, function(y)
+  dplyr::select(.data = y,
+                        Sp_abb_name, 
+                        Stress)%>%unique)
+
+#join centroids with per-species emtadata
+centroid_with_metadata_l<-
+  mapply(function (a,b)
+    left_join(a,b),
+    a = centroid_l,
+    b = unique_meta_l,
+    SIMPLIFY = FALSE)
+
+centroid_with_metadata<-
+  do.call("rbind", centroid_with_metadata_l)
+
+rownames(centroid_with_metadata)<-NULL
+
+return(centroid_with_metadata)
+
+})
+
+# prepare df for heatmap plot 
+re_created_traitontree_df<-
+  do.call("rbind", re_created_traitontree)%>%rownames_to_column(var = "taxonomic_group")
+
+re_created_traitontree_df$taxonomic_group<-
+  gsub(x = re_created_traitontree_df$taxonomic_group, pattern = "\\.\\d+", replacement = "")
+
+
+#make table longer so all scaled PCs are in one column
+re_created_traitontree_df<-
+  pivot_longer(data = re_created_traitontree_df, cols = 5:6, names_to = "scaled_PCoA_axis", values_to = "scaled_PCoA")
+
+  #re-join pcoa axis with taxonomic group
+trait_naming_output<-
+  mapply(function (z,y)
+         gsub(x = z,
+              pattern = "centroid_scaled",
+              replacement = y),
+         z = re_created_traitontree_df$scaled_PCoA_axis,
+         y = re_created_traitontree_df$taxonomic_group,
+         SIMPLIFY = TRUE )
+re_created_traitontree_df$trait<-as.vector(trait_naming_output)
+
+#join hi/low pc information
+heatmap_input<-
+  left_join(re_created_traitontree_df,
+            dplyr::select(bac_alltaxa_phylosig_output_PCoA_nonsig$df_phylosig, higher_lower_PC, trait,stress))
+
+
+#prepare order of facotrs
+taxonomic_group_ordering<-
+  factor(bac_alltaxa_phylosig_output_PCoA_nonsig$df_phylosig$column_label%>%unique,
+         levels = bac_alltaxa_phylosig_output_PCoA_nonsig$df_phylosig$column_label%>%unique)
+
+#adjust order of factors
+heatmap_input$taxonomic_group<-
+  factor(heatmap_input$taxonomic_group, levels = levels(taxonomic_group_ordering))
+
+perm_528_phylosig_pct_df$taxonomic_group<-
+  factor(perm_528_phylosig_pct_df$taxonomic_group, levels = levels(taxonomic_group_ordering))
+
+# change order of the species to reflect newst phylogeny
+heatmap_input$Sp_abb_name<-factor(heatmap_input$Sp_abb_name, levels = Bra_tree_for_plot$tip.label)%>%
+  fct_rev() # rever order to keet At as the first
+  
+
+
+
+```
+
+## Trait_on_tree: filter df (significant interaction, abouheif) and plot heatmap
+this plot only contains the taxonomic groups that passed permanova/PCOA filtering
+these are further filtered to contain only taxa with significat sp*stress interactions and significat abouheif signals
+
+plots heatmaps + barplots with abouheif
+
+*ATTENTION* this is the chunk that defines teh filtering of taxonomic groups that will be showin in figure 1!
+```{r}
+
+
+
+#####  ------------------- #####
+#####  different taxonomic groups per stress (panel of 3 plots) #####
+#####  ------------------- #####
+
+
+
+# only keep taxonomic groups with...
+  # significant interaction 
+  # significant abouheif
+  # at least 15% variance explained by permanova (residual smaller than 0.8, simialr to K__Bacteria)
+  # PCoA_1 explains at least 1.25 time the variance of PCOA_2 (sufficient variance explained in 2 dimensions, simialr to K__Bacteria)
+  # at least 2 of the 3 factors (block, plant species, stress) presents unimodal distanes to centroids (p<0.001)
+  # at least 2 of the 3 factors (block, plant species, stress) presents distanes to centroids distribution similar to k__Bacteria (p<0.001)
+
+
+taxonomic_groups_sig_interaction_Control<-
+  dplyr::filter(perm_528_phylosig_pct_df, 
+                pvalue_Sp_x_Stress<0.05,
+                residual_permanova<0.85,
+                var_explined_ratio>1.25,
+                unimodal_residues001 >=2,
+                residue_dist_simialr_to_K__bacteria001 >=2,
+                pvalue_Control_Higher_PC<0.05,
+                p_value_Mantel_Control<0.05) 
+
+taxonomic_groups_sig_interaction_MeJA<-
+  dplyr::filter(perm_528_phylosig_pct_df, 
+                pvalue_Sp_x_Stress<0.05, 
+                residual_permanova<0.85,
+                var_explined_ratio>1.25,
+                unimodal_residues001 >=2,
+                residue_dist_simialr_to_K__bacteria001 >=2,
+                pvalue_MeJA_Higher_PC<0.05,
+                p_value_Mantel_MeJA<0.05) 
+
+taxonomic_groups_sig_interaction_SA<-
+  dplyr::filter(perm_528_phylosig_pct_df, 
+                pvalue_Sp_x_Stress<0.05, 
+                residual_permanova<0.85,
+                var_explined_ratio>1.25,
+                unimodal_residues001 >=2,
+                residue_dist_simialr_to_K__bacteria001 >=2,
+                pvalue_SA_Higher_PC<0.05,
+                p_value_Mantel_SA<0.05) 
+
+#filter df to the taxonomies and samples above
+heatmap_input_filtered_interaction_Control<-
+  dplyr::filter(heatmap_input, 
+                heatmap_input$taxonomic_group %in% taxonomic_groups_sig_interaction_Control$taxonomic_group,
+                higher_lower_PC == "Higher_PC", 
+                Stress =="Control") 
+
+heatmap_input_filtered_interaction_MeJA<-
+  dplyr::filter(heatmap_input, 
+                heatmap_input$taxonomic_group %in% taxonomic_groups_sig_interaction_MeJA$taxonomic_group,
+                higher_lower_PC == "Higher_PC", 
+                Stress =="MeJA") 
+  
+
+heatmap_input_filtered_interaction_SA<-
+  dplyr::filter(heatmap_input, 
+                heatmap_input$taxonomic_group %in% taxonomic_groups_sig_interaction_SA$taxonomic_group,
+                higher_lower_PC == "Higher_PC", 
+                Stress =="SA") 
+  
+  
+#heatmap plots
+heatmap_PCoA_coord_005_Control<-
+ggplot(data = heatmap_input_filtered_interaction_Control, aes(y = Sp_abb_name, x = taxonomic_group, fill = scaled_PCoA))+
+  geom_tile()+
+  scale_y_discrete(limits=rev)+
+    scale_fill_viridis(option = "B")+
+    scale_color_viridis(option = "B")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 1, hjust=1))+
+  facet_wrap(~Stress)+
+  ylab(NULL)
+
+heatmap_PCoA_coord_005_MeJA<-
+ggplot(data = heatmap_input_filtered_interaction_MeJA, aes(y = Sp_abb_name, x = taxonomic_group, fill = scaled_PCoA))+
+  geom_tile()+
+  scale_y_discrete(limits=rev)+
+    scale_fill_viridis(option = "B")+
+    scale_color_viridis(option = "B")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 1, hjust=1))+
+  facet_wrap(~Stress)+
+  ylab(NULL)
+
+heatmap_PCoA_coord_005_SA<-
+ggplot(data = heatmap_input_filtered_interaction_SA, aes(y = Sp_abb_name, x = taxonomic_group, fill = scaled_PCoA))+
+  geom_tile()+
+  scale_y_discrete(limits=rev)+
+    scale_fill_viridis(option = "B")+
+    scale_color_viridis(option = "B")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 1, hjust=1))+
+  facet_wrap(~Stress)+
+  ylab(NULL)
+
+#arrange plots proportionally
+heamap_diff_taxonomic_group_per_stress<-
+ggarrange(heatmap_PCoA_coord_005_Control,
+          heatmap_PCoA_coord_005_MeJA,
+          heatmap_PCoA_coord_005_SA,
+          nrow = 1, 
+          common.legend = TRUE, legend = "bottom",
+          align = "h",  
+          widths = c(dim(heatmap_input_filtered_interaction_Control)[1],
+                     dim(heatmap_input_filtered_interaction_MeJA)[1],
+                     dim(heatmap_input_filtered_interaction_SA)[1]))
+
+
+
+#prepare barpltos to show on top of heatmaps
+
+barplot_Control_abouheif<-
+ggplot(data = taxonomic_groups_sig_interaction_Control, aes(x = taxonomic_group, y = value_Control_Higher_PC))+
+  geom_bar(stat = "identity", 
+           fill = colour_v[5],
+           alpha = if_else(condition = taxonomic_groups_sig_interaction_Control$pvalue_Control_Higher_PC<0.05,
+                     true = 1 ,
+                     false = 0.3))+
+    geom_point(aes(x = taxonomic_group, 
+                 y = r2_Mantel_Control), 
+             alpha = if_else(condition = taxonomic_groups_sig_interaction_Control$p_value_Mantel_Control<0.05,
+                     true = 1 ,
+                     false = 0.3),
+             size = 2)+
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        legend.position = "none")+
+  ylim(c(0,0.61))+
+#  ylim(c(0,1))+
+  ylab("Control - Bars: Abouheif's C Mean / Dots: Mantel R2")
+
+barplot_MeJA_abouheif<-
+ggplot(data = taxonomic_groups_sig_interaction_MeJA, aes(x = taxonomic_group, y = value_MeJA_Higher_PC))+
+  geom_bar(stat = "identity",
+           fill = colour_v[3],
+           alpha = if_else(condition = taxonomic_groups_sig_interaction_MeJA$pvalue_MeJA_Higher_PC<0.05,
+                   true = 1 ,
+                   false = 0.3))+
+    geom_point(aes(x = taxonomic_group, 
+                 y = r2_Mantel_MeJA), 
+             alpha = if_else(condition = taxonomic_groups_sig_interaction_MeJA$p_value_Mantel_MeJA<0.05,
+                     true = 1 ,
+                     false = 0.3 ),
+             size = 2)+
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        legend.position = "none")+
+  ylim(c(0,0.61))+
+  #  ylim(c(0,1))+
+    ylab("MeJA - Bars: Abouheif's C Mean / Dots: Mantel R2")
+
+
+barplot_SA_abouheif<-
+ggplot(data = taxonomic_groups_sig_interaction_SA, aes(x = taxonomic_group, y = value_SA_Higher_PC))+
+  geom_bar(stat = "identity", 
+           fill = colour_v[4],
+           alpha = if_else(condition = taxonomic_groups_sig_interaction_SA$pvalue_SA_Higher_PC<0.05,
+                  true = 1 ,
+                  false = 0.3))+
+  geom_point(aes(x = taxonomic_group, 
+                 y = r2_Mantel_SA), 
+             alpha = if_else(condition = taxonomic_groups_sig_interaction_SA$p_value_Mantel_SA<0.05,
+                     true = 1 ,
+                     false = 0.3 ),
+             size = 2)+
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+         legend.position = "none")+
+  ylim(c(0,0.61))+
+   # ylim(c(0,1))+
+    ylab("SA - Bars: Abouheif's C Mean / Dots: Mantel R2")
+
+
+
+
+#arrange plots proportionally
+barplot_abouheif_taxonomic_group_per_stress<-
+ggarrange(barplot_Control_abouheif,
+          barplot_MeJA_abouheif,
+          barplot_SA_abouheif,
+          nrow = 1, 
+          common.legend = TRUE, 
+          align = "h",  
+          widths = c(dim(heatmap_input_filtered_interaction_Control)[1],
+                     dim(heatmap_input_filtered_interaction_MeJA)[1],
+                     dim(heatmap_input_filtered_interaction_SA)[1]))
+
+
+#put barplots on top of heatmaps, proportionally
+barplots_Abouheif_heatmaps_PCoA<-
+ggarrange(barplot_abouheif_taxonomic_group_per_stress,
+          heamap_diff_taxonomic_group_per_stress,
+          nrow = 2,
+          heights = c(1,3),
+          align = "hv")
+
+
+
+
+#save heatmap, significant interactions and abouheif at each stress
+ggsave(barplots_Abouheif_heatmaps_PCoA, 
+       filename = "./14_Phylogenetic_distance/results/Results_April2023/trait_on_tree_heatmap_barplot_005Interaction_005Abouheif__PCratio125_residual085_unimodal2_SK2_mantelR2dot_overlap.pdf",
+     width = 525, 
+     height = 375, 
+     units = "mm")
+
+
+
+```
+
+
+
+## Trait_on_tree:  plot heatmap of taxonomies that failed the interaction and abouheif significane selection
+
+here we still only look at the taxonomies that passed the ermanova filters
+coordinates of taxonomic groups with NO significatn sp*stress interactions AND no significant abouheif
+
+heatmaps + barplots with abouheif
+
+```{r}
+
+
+
+#####  ------------------- #####
+#####  different taxonomic groups per stress (panel of 3 plots) #####
+#####  ------------------- #####
+
+
+
+# only keep taxonomic groups with...
+# not present in taxonomic_groups_sig_interaction_Control, taxonomic_groups_sig_interaction_MeJA, taxonomic_groups_sig_interaction_SA
+  # at least 15% variance explained by permanova (residual smaller than 0.8, simialr to K__Bacteria)
+  # PCoA_1 explains at least 1.25 time the variance of PCOA_2 (sufficient variance explained in 2 dimensions, simialr to K__Bacteria)
+  # at least 2 of the 3 factors (block, plant species, stress) presents unimodal distanes to centroids (p<0.001)
+  # at least 2 of the 3 factors (block, plant species, stress) presents distanes to centroids distribution similar to k__Bacteria (p<0.001)
+
+taxonomic_groups_nonsig_Control<-
+  dplyr::filter(perm_528_phylosig_pct_df, 
+                !taxonomic_group %in% taxonomic_groups_sig_interaction_Control$taxonomic_group,
+                residual_permanova<0.85,
+                var_explined_ratio>1.25,
+                unimodal_residues001 >=2,
+                residue_dist_simialr_to_K__bacteria001 >=2) 
+
+taxonomic_groups_nonsig_MeJA<-
+  dplyr::filter(perm_528_phylosig_pct_df,
+                !taxonomic_group %in% taxonomic_groups_sig_interaction_MeJA$taxonomic_group,
+                residual_permanova<0.85,
+                var_explined_ratio>1.25,
+                unimodal_residues001 >=2,
+                residue_dist_simialr_to_K__bacteria001 >=2) 
+
+taxonomic_groups_nonsig_SA<-
+  dplyr::filter(perm_528_phylosig_pct_df, 
+                !taxonomic_group %in% taxonomic_groups_sig_interaction_SA$taxonomic_group,
+                residual_permanova<0.85,
+                var_explined_ratio>1.25,
+                unimodal_residues001 >=2,
+                residue_dist_simialr_to_K__bacteria001 >=2)
+
+#filter df to the taxonomies and samples above
+heatmap_input_filtered_nonsig_Control<-
+  dplyr::filter(heatmap_input, 
+                heatmap_input$taxonomic_group %in% taxonomic_groups_nonsig_Control$taxonomic_group,
+                higher_lower_PC == "Higher_PC", 
+                Stress =="Control") 
+
+heatmap_input_filtered_nonsig_MeJA<-
+  dplyr::filter(heatmap_input, 
+                heatmap_input$taxonomic_group %in% taxonomic_groups_nonsig_MeJA$taxonomic_group,
+                higher_lower_PC == "Higher_PC", 
+                Stress =="MeJA") 
+  
+
+heatmap_input_filtered_nonsig_SA<-
+  dplyr::filter(heatmap_input, 
+                heatmap_input$taxonomic_group %in% taxonomic_groups_nonsig_SA$taxonomic_group,
+                higher_lower_PC == "Higher_PC", 
+                Stress =="SA") 
+  
+  
+#heatmap plots
+heatmap_PCoA_coord_nonsig_Control<-
+ggplot(data = heatmap_input_filtered_nonsig_Control, aes(y = Sp_abb_name, x = taxonomic_group, fill = scaled_PCoA))+
+  geom_tile()+
+  scale_y_discrete(limits=rev)+
+    scale_fill_viridis(option = "B")+
+    scale_color_viridis(option = "B")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 1, hjust=1))+
+  facet_wrap(~Stress)+
+  ylab(NULL)
+
+heatmap_PCoA_coord_nonsig_MeJA<-
+ggplot(data = heatmap_input_filtered_nonsig_MeJA, aes(y = Sp_abb_name, x = taxonomic_group, fill = scaled_PCoA))+
+  geom_tile()+
+  scale_y_discrete(limits=rev)+
+    scale_fill_viridis(option = "B")+
+    scale_color_viridis(option = "B")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 1, hjust=1))+
+  facet_wrap(~Stress)+
+  ylab(NULL)
+
+heatmap_PCoA_coord_nonsig_SA<-
+ggplot(data = heatmap_input_filtered_nonsig_SA, aes(y = Sp_abb_name, x = taxonomic_group, fill = scaled_PCoA))+
+  geom_tile()+
+  scale_y_discrete(limits=rev)+
+    scale_fill_viridis(option = "B")+
+    scale_color_viridis(option = "B")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 1, hjust=1))+
+  facet_wrap(~Stress)+
+  ylab(NULL)
+
+#arrange plots proportionally
+heamap_diff_taxonomic_group_per_stress_nonsig<-
+ggarrange(heatmap_PCoA_coord_nonsig_Control,
+          heatmap_PCoA_coord_nonsig_MeJA,
+          heatmap_PCoA_coord_nonsig_SA,
+          nrow = 1, 
+          common.legend = TRUE, legend = "bottom",
+          align = "h",  
+          widths = c(dim(heatmap_input_filtered_nonsig_Control)[1],
+                     dim(heatmap_input_filtered_nonsig_MeJA)[1],
+                     dim(heatmap_input_filtered_nonsig_SA)[1]))
+
+
+
+#prepare barpltos to show on top of heatmaps
+barplot_Control_nonsig_abouheif<-
+ggplot(data = taxonomic_groups_nonsig_Control, aes(x = taxonomic_group, y = value_Control_Higher_PC))+
+  geom_bar(stat = "identity", 
+           fill = colour_v[5],
+           alpha = if_else(condition = taxonomic_groups_nonsig_Control$pvalue_Control_Higher_PC<0.05,
+                     true = 1 ,
+                     false = 0.3))+
+    geom_point(aes(x = taxonomic_group, 
+                 y = r2_Mantel_Control), 
+             alpha = if_else(condition = taxonomic_groups_nonsig_Control$p_value_Mantel_Control<0.05,
+                     true = 1 ,
+                     false = 0.3),
+             size = 2)+
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        legend.position = "none")+  
+    ylim(c(-0.2,0.61))+
+    ylab("Control - Bars: Abouheif's C Mean / Dots: Mantel R2")
+
+barplot_MeJA_nonsig_abouheif<-
+ggplot(data = taxonomic_groups_nonsig_MeJA, aes(x = taxonomic_group, y = value_MeJA_Higher_PC))+
+ geom_bar(stat = "identity",
+           fill = colour_v[3],
+           alpha = if_else(condition = taxonomic_groups_nonsig_MeJA$pvalue_MeJA_Higher_PC<0.05,
+                   true = 1 ,
+                   false = 0.3))+
+    geom_point(aes(x = taxonomic_group, 
+                 y = r2_Mantel_MeJA), 
+             alpha = if_else(condition = taxonomic_groups_nonsig_MeJA$p_value_Mantel_MeJA<0.05,
+                     true = 1 ,
+                     false = 0.3 ),
+             size = 2)+
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        legend.position = "none")+
+  ylim(c(-0.2,0.61))+
+  #  ylim(c(0,1))+
+    ylab("MeJA - Bars: Abouheif's C Mean / Dots: Mantel R2")
+
+
+barplot_SA_nonsig_abouheif<-
+ggplot(data = taxonomic_groups_nonsig_SA, aes(x = taxonomic_group, y = value_SA_Higher_PC))+
+ geom_bar(stat = "identity", 
+           fill = colour_v[4],
+           alpha = if_else(condition = taxonomic_groups_nonsig_SA$pvalue_SA_Higher_PC<0.05,
+                  true = 1 ,
+                  false = 0.3))+
+  geom_point(aes(x = taxonomic_group, 
+                 y = r2_Mantel_SA), 
+             alpha = if_else(condition = taxonomic_groups_nonsig_SA$p_value_Mantel_SA<0.05,
+                     true = 1 ,
+                     false = 0.3 ),
+             size = 2)+
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+         legend.position = "none")+
+  ylim(c(-0.2,0.61))+
+   # ylim(c(0,1))+
+    ylab("SA - Bars: Abouheif's C Mean / Dots: Mantel R2")
+
+
+
+#arrange plots proportionally
+barplot_abouheif_taxonomic_group_per_stress_nonsig<-
+ggarrange(barplot_Control_nonsig_abouheif,
+          barplot_MeJA_nonsig_abouheif,
+          barplot_SA_nonsig_abouheif,
+          nrow = 1, 
+          common.legend = TRUE, 
+          align = "h",  
+          widths = c(dim(heatmap_input_filtered_nonsig_Control)[1],
+                     dim(heatmap_input_filtered_nonsig_MeJA)[1],
+                     dim(heatmap_input_filtered_nonsig_SA)[1]))
+
+
+#put barplots on top of heatmaps, proportionally
+barplots_Abouheif_heatmaps_PCoA_nonsig<-
+ggarrange(barplot_abouheif_taxonomic_group_per_stress_nonsig,
+          heamap_diff_taxonomic_group_per_stress_nonsig,
+          nrow = 2,
+          heights = c(0.8,3),
+          align = "hv")
+
+
+
+#save heatmap, significant interactions and abouheif at each stress
+ggsave(barplots_Abouheif_heatmaps_PCoA_nonsig, 
+       filename = "./14_Phylogenetic_distance/results/Results_April2023/trait_on_tree_heatmap_barplot_nonsig__PCratio125_residual085_unimodal2_SK2_overlap.pdf",
+     width = 700, 
+     height = 300, 
+     units = "mm")
+
+
+
+```
+
+
+#### ####################
+### ## heat_tree plots ##
+#### ####################
+
+
+# heat_tree: prepare phylosig pipeline output heat tree visualization
+
+we only keep teh higehr of 2 PCoAs for simplification. this means that microbial  taxa with a significat abouheif value in both PCs is treated jsut like taxa with significant abouheif value in a single PC. the comparision is between the higeest abouheif value we could find
+```{r}
+
+# filter to higher PC only; remove f/g__uncultured that is meaningless
+all_taxa_phylosig<-dplyr::filter(bac_alltaxa_phylosig_output_PCoA_nonsig$df_phylosig, 
+                                 higher_lower_PC == "Higher_PC", 
+                                 column_label!="NAs")%>%
+  filter(!grepl("uncultured", column_label))
+
+
+```
+
+
+
+# heat_tree: create taxmap object for phylosig heat tree
+```{r}
+
+# fitler phyloseq to remove taxa abset from df
+to_parse<-CSS_BacFun_rhizoplane_HighFilt_ps_l$Bac
+
+# turn NA in taxonomy (such as c__alphaproteobacteria; NA;NA;NA) into "" to avoid removal from tree
+to_parse@tax_table@.Data[is.na(to_parse@tax_table)]<-""
+
+#remove sp and taxonomy confidence
+to_parse@tax_table<-to_parse@tax_table[,1:6]
+
+#we won't need reference sequences, lets remove as they were giving arnings
+to_parse@refseq<-NULL
+
+#parse phylsoeq to metacoder
+metacoder_bac<-parse_phyloseq(to_parse)
+
+```
+
+
+## heat_tree: filter and prepare taxmap object
+```{r}
+
+#define the taxonomies inside our taxmap object
+library(purrr)
+char_taxmap<-lapply(metacoder_bac$taxa, function (x)
+    x$get_name())%>%
+    purrr::map(1)
+
+# subset taxonomies, keeping only those present in all_taxa_phylosig 
+metacoder_bac<-metacoder::filter_taxa(metacoder_bac, 
+                                      char_taxmap%>%as.character() %in% unique(filtered_permavonas$taxonomic_group),
+                                      reassign_obs = FALSE)
+
+
+#rearrange phylosig df to fit metacoder
+phylosig_to_taxmap<-
+pivot_wider(data = dplyr::select(all_taxa_phylosig, column_label, stress, value, pvalue),
+            names_from = stress, 
+            values_from = c(value, pvalue))
+
+#########################################
+#### IMPORTANT, PLOT-AFFECTING STEP #### 
+#filter df remove taxonomic groups that were dsicarded due to permanova/PCOA quality filtering
+phylosig_to_taxmap<-
+  phylosig_to_taxmap[phylosig_to_taxmap$column_label %in% filtered_permavonas$taxonomic_group,]
+#########################################
+
+#check if the taxmap and phylisg_df tazons are identical (in teh same order)
+identical(lapply(metacoder_bac$taxa, function (x)
+           x$get_name())%>%
+           purrr::map(1)%>%as.character(),  
+          unique(phylosig_to_taxmap$column_label))
+
+#add tax map codes (aab, aac...) to the phylosig df
+metacoder_taxon_names<-data.frame(taxon_id = as.character(taxon_names(metacoder_bac)%>%names), 
+                                  column_label = taxon_names(metacoder_bac)%>%as.character)
+
+phylosig_to_taxmap<-left_join(phylosig_to_taxmap, metacoder_taxon_names)
+
+# add phylosig df to taxmap                                  
+metacoder_bac$data$phylosig_to_taxmap<-phylosig_to_taxmap
+
+# check again if taxonomy orders match
+identical(taxon_names(metacoder_bac)%>%names, metacoder_bac$data$phylosig_to_taxmap$taxon_id)
+
+#count number of unique with significant phylosig (per taxon level)
+metacoder_bac$data$tax_data$Kingdom%>%unique%>%length()
+metacoder_bac$data$tax_data$Phylum%>%unique%>%length()
+metacoder_bac$data$tax_data$Class%>%unique%>%length()
+metacoder_bac$data$tax_data$Order%>%unique%>%length()
+metacoder_bac$data$tax_data$Family%>%unique%>%length()
+metacoder_bac$data$tax_data$Genus%>%unique%>%length()
+
+```
+
+## heat_tree: add mantel test results to the phylosig_to_taxmap
+```{r}
+#subset 528_permanova_df to only contain mantel test values
+mantel_to_taxmap_df<-
+  dplyr:: select(perm_528_phylosig_pct_df, 
+                 taxonomic_group,
+                 r2_Mantel_Control,
+                 r2_Mantel_MeJA,
+                 r2_Mantel_SA,
+                 p_value_Mantel_Control,
+                 p_value_Mantel_MeJA,
+                 p_value_Mantel_SA)
+               
+# add mantel test results to the phylosig_to_taxmap object
+phylosig_to_taxmap<-left_join(phylosig_to_taxmap, mantel_to_taxmap_df, by = c("column_label" ="taxonomic_group"))
+```
+
+
+
+### heat_tree: Compare and plot control and MeJA with metacoder
+```{r}
+
+# remove SA
+metacoder_Control_MeJA<-
+filter_obs(obj = metacoder_bac, 
+           data = c("sample_data"),
+           Stress %in% c("Control","MeJA"), 
+           drop_obs = TRUE)
+
+
+
+
+#abundance per taxon 
+metacoder_Control_MeJA$data$tax_abund<-calc_taxon_abund(obj = metacoder_Control_MeJA, 
+                                            data = "otu_table", 
+                                            cols = metacoder_Control_MeJA$data$sample_data$sample_id) 
+
+#get occurrence of ASVs per treatment
+metacoder_Control_MeJA$data$tax_occ_3treatments <- calc_n_samples(obj = metacoder_Control_MeJA, 
+                                                      data = "tax_abund", 
+                                                      cols = metacoder_Control_MeJA$data$sample_data$sample_id,
+                                                      groups = metacoder_Control_MeJA$data$sample_data$Stress) 
+
+# calculate log2 median ratios 
+metacoder_Control_MeJA$data$diff_table_3treatments <- compare_groups(obj = metacoder_Control_MeJA,
+                                                            data = "tax_abund",
+                                                            cols = metacoder_Control_MeJA$data$sample_data$sample_id, 
+                                                            groups = metacoder_Control_MeJA$data$sample_data$Stress) 
+
+# define column with the difference on phylosig value of treatment 1 vc treatment 2 in a format metacoder understands
+metacoder_Control_MeJA$data$diff_table_3treatments$t1_t2_phylosig<- 
+  metacoder_Control_MeJA$data$phylosig_to_taxmap$value_Control - metacoder_Control_MeJA$data$phylosig_to_taxmap$value_MeJA
+
+
+# save vector of taxonomies in the taxmap object for the label colors operations below
+taxmap_label<-metacoder_Control_MeJA$data$phylosig_to_taxmap$column_label
+
+
+# make heat tree of phylogenetic signal
+heat_tree(.input = metacoder_Control_MeJA,
+                 node_label = taxon_names,
+                 node_color = metacoder_Control_MeJA$data$diff_table_3treatments$t1_t2_phylosig, 
+                 node_color_range =  c(colour_v[3], "#FAF9F6", colour_v[5]),
+                 node_color_trans = "linear", 
+                 node_color_interval = c(-0.5, 0.5), 
+                 edge_color_interval = c(-0.5, 0.5), 
+                 node_size_axis_label = "Size: large for significant Abouheif & Mantel",
+                 node_size = ifelse(phylosig_to_taxmap$pvalue_MeJA<0.05 &
+                                      phylosig_to_taxmap$p_value_Mantel_MeJA<0.05 | 
+                                      phylosig_to_taxmap$pvalue_Control <0.05 &
+                                      phylosig_to_taxmap$p_value_Mantel_Control<0.05, 
+                                    yes = 2.5,
+                                    no = 0.25),
+                 node_color_axis_label = "Color: difference in Abouheif", #; Yellow MeJA Grey Control
+                 initial_layout = "reingold-tilford",
+                 output_file = "./14_Phylogenetic_distance/results/Results_April2023/phylosig_tree_PCoA_Control_MeJA_PERMVANOVA_filt.pdf")   
+
+
+```
+
+
+### heat_tree: Compare and plot control and SA with metacoder
+
+```{r}
+
+# remove MeJA
+metacoder_Control_SA<-
+filter_obs(obj = metacoder_bac, 
+           data = c("sample_data"),
+           Stress %in% c("Control","SA"), 
+           drop_obs = TRUE)
+
+
+
+
+#abundance per taxon 
+metacoder_Control_SA$data$tax_abund<-calc_taxon_abund(obj = metacoder_Control_SA, 
+                                            data = "otu_table", 
+                                            cols = metacoder_Control_SA$data$sample_data$sample_id) 
+
+#get occurrence of ASVs per treatment
+metacoder_Control_SA$data$tax_occ_3treatments <- calc_n_samples(obj = metacoder_Control_SA, 
+                                                      data = "tax_abund", 
+                                                      cols = metacoder_Control_SA$data$sample_data$sample_id,
+                                                      groups = metacoder_Control_SA$data$sample_data$Stress) 
+
+# calculate log2 median ratios 
+metacoder_Control_SA$data$diff_table_3treatments <- compare_groups(obj = metacoder_Control_SA,
+                                                            data = "tax_abund",
+                                                            cols = metacoder_Control_SA$data$sample_data$sample_id, 
+                                                            groups = metacoder_Control_SA$data$sample_data$Stress) 
+
+# define column with the difference on phylosig value of treatment 1 vc treatment 2 in a format emtacoder understands
+metacoder_Control_SA$data$diff_table_3treatments$t1_t2_phylosig<- 
+  metacoder_Control_SA$data$phylosig_to_taxmap$value_Control - metacoder_Control_SA$data$phylosig_to_taxmap$value_SA
+
+
+# save vector of taxonomies in the taxmap object for the label colors operations below
+taxmap_label<-metacoder_Control_SA$data$phylosig_to_taxmap$column_label
+
+
+# in red, golden taxa that overlap between methods (most on SA)
+set.seed(1)
+heat_tree(.input = metacoder_Control_SA,
+                 node_label = taxon_names,
+                 node_color = metacoder_Control_SA$data$diff_table_3treatments$t1_t2_phylosig, 
+                 node_color_range =  c(colour_v[4], "#FAF9F6", colour_v[5]),
+                 node_color_trans = "linear", 
+                 node_color_interval = c(-0.5, 0.5), 
+                 edge_color_interval = c(-0.5, 0.5), 
+                 node_size_axis_label = "Size: large for significat Abouheif",
+                 node_size = ifelse(phylosig_to_taxmap$pvalue_SA<0.05 &
+                                       phylosig_to_taxmap$p_value_Mantel_SA<0.05 | 
+                                      phylosig_to_taxmap$pvalue_Control <0.05 &
+                                      phylosig_to_taxmap$p_value_Mantel_Control<0.05, 
+                                    yes = 2.5,
+                                    no = 0.25),
+                 node_color_axis_label = "Color: difference in Abouheif", #; Green SA Grey Control
+                 layout = "davidson-harel", # The primary layout algorithm
+                 initial_layout = "reingold-tilford",
+                 output_file = "./14_Phylogenetic_distance/results/Results_April2023/phylosig_tree_PCoA_Control_SA_PERMVANOVA_filt.pdf")   
+
+
+
+
+```
+
+
+
+
+
+
+# -----------------
+# FUNGAL phylogenetic signal
+# -----------------
+
+# 14.2 - load ps, remove species outside tree 
+
+```{R}
+
+#load the output of the phylogenetic signal pipeline - all taxa in 1 list
+load(file = "./14_Phylogenetic_distance/r_objects/fun_alltaxa_phylosig_PCoA_nonsig.RData") 
+
+#load the output of the phylogenetic signal pipeline - one list per taxonomic rank
+load(file = "./14_Phylogenetic_distance/r_objects/per_level_fun_phylosig_PPCA.RData") 
+
+# a df with various metrics of the 70 permanovas
+load(file = "./14_Phylogenetic_distance/r_objects/perm_70_phylosig_pct_df.RData")
+
+# a df with of permanovas filtered absed on various metrics
+# load(file = "./14_Phylogenetic_distance/r_objects/filtered_permavonas.RData")
+
+#load output of mantel pipeline
+load(file = "./14_Phylogenetic_distance/r_objects/fun_alltaxa_mantel_pipeline_df.RData")
+
+# load hundreds of PCoA plots
+load(file = "./14_Phylogenetic_distance/r_objects/PCoA_Fun_70_plots_axis_pct.RData") # one per tax group
+load(file = "./14_Phylogenetic_distance/r_objects/PCoA_Fun_70_3x_plots_axis_pct.RData") # one per tax group and per stress
+
+# load PS data
+load("./Data/phyloseq_objects/CSS_BacFun_rhizoplane_HighFilt_ps_l.RData")
+
+# remove all species outside the MY trees
+CSS_BacFun_rhizoplane_HighFilt_ps_l <- 
+  lapply(CSS_BacFun_rhizoplane_HighFilt_ps_l, function(x) 
+    subset_samples(x, MY_tree_presence == "inside_MY_tree"))
+
+
+
+```
+
+
+#### ####################
+## ## Trait_on_tree plots ##
+#### ####################
+
+# Trait_on_tree plot: heatmap of PCoA coodinaties per plant species
+
+This is the basis of the main figures for the paper.
+All plots only contains the taxonomic groups that passed permanova/PCOA filtering
+
+## plot brassicaceae phylogeny tree, export as pdf
+
+
+```{r}
+#load tree
+Bra_tree_for_plot<-load_prepare_MY_tree()
+
+#save tree plot
+ pdf(file = "./14_Phylogenetic_distance/results/Results_April2023/bra_tree_hendriks.pdf",
+     width = 4, 
+     height = 6) 
+ 
+ #plot
+ plot(Bra_tree_for_plot)
+  dev.off()
+
+  
+  
+  
+
+```
+
+
+## Trait_on_tree: prepare df for heatmap
+
+```{r}
+
+# create df with PCoA coordinates for a heatmap plot
+re_created_traitontree<-
+lapply(fun_alltaxa_phylosig_PCoA_nonsig$ordination_coordinates_l, function(x){
+  
+  
+  #extract emtadata
+  metadata<-as(x@sam_data, "data.frame")
+  
+  #add extended lineage  
+  metadata$Sp_Lineage_Walden_extended<-  
+        if_else(condition = metadata$Sp_abb_name %in% c("Ia", "Lm", "Co", "Bi"), 
+              true ="lineage_II_extended",
+              false =  metadata$Sp_Lineage_Walden)
+        
+        
+        
+  
+  #split by stress
+  metadata_split<-split(metadata, f = metadata$Stress)
+  
+
+  #calcualte centroid
+centroid_l<-
+  lapply(metadata_split, function(z){
+    
+    #calculate centroid
+    centroid <- aggregate(cbind(PCoA_1, PCoA_2) ~ Sp_abb_name, data = z, FUN = mean)
+
+    #if Sar is positive on the PC1, rotate the axis by multiplying it by -1
+    if(filter(centroid,Sp_abb_name == "Sar")$PCoA_1>0) {
+       centroid$PCoA_1<-centroid$PCoA_1*-1 
+    }
+    
+    #if Sar is positive on the PC2, rotate the axis by multiplying it by -1
+    if(filter(centroid,Sp_abb_name == "Sar")$PCoA_2>0) {
+       centroid$PCoA_2<-centroid$PCoA_2*-1 
+    }
+
+
+    #scale and centr PCoA1 and 2
+    centroid$PCoA_1_centroid_scaled<-scale(centroid$PCoA_1,center = TRUE, scale = TRUE)
+    centroid$PCoA_2_centroid_scaled<-scale(centroid$PCoA_2,center = TRUE, scale = TRUE)
+    
+    return(centroid)
+  })
+
+# extract per-species metadata
+unique_meta_l<-lapply(metadata_split, function(y)
+  dplyr::select(.data = y,
+                        Sp_abb_name, 
+                        Stress)%>%unique)
+
+#join centroids with per-species emtadata
+centroid_with_metadata_l<-
+  mapply(function (a,b)
+    left_join(a,b),
+    a = centroid_l,
+    b = unique_meta_l,
+    SIMPLIFY = FALSE)
+
+centroid_with_metadata<-
+  do.call("rbind", centroid_with_metadata_l)
+
+rownames(centroid_with_metadata)<-NULL
+
+return(centroid_with_metadata)
+
+})
+
+# prepare df for heatmap plot 
+re_created_traitontree_df<-
+  do.call("rbind", re_created_traitontree)%>%rownames_to_column(var = "taxonomic_group")
+
+re_created_traitontree_df$taxonomic_group<-
+  gsub(x = re_created_traitontree_df$taxonomic_group, pattern = "\\.\\d+", replacement = "")
+
+
+#make table longer so all scaled PCs are in one column
+re_created_traitontree_df<-
+  pivot_longer(data = re_created_traitontree_df, cols = 5:6, names_to = "scaled_PCoA_axis", values_to = "scaled_PCoA")
+
+  #re-join pcoa axis with taxonomic group
+trait_naming_output<-
+  mapply(function (z,y)
+         gsub(x = z,
+              pattern = "centroid_scaled",
+              replacement = y),
+         z = re_created_traitontree_df$scaled_PCoA_axis,
+         y = re_created_traitontree_df$taxonomic_group,
+         SIMPLIFY = TRUE )
+re_created_traitontree_df$trait<-as.vector(trait_naming_output)
+
+#join hi/low pc information
+heatmap_input<-
+  left_join(re_created_traitontree_df,
+            dplyr::select(fun_alltaxa_phylosig_PCoA_nonsig$df_phylosig, higher_lower_PC, trait,stress))
+
+
+#prepare order of facotrs
+taxonomic_group_ordering<-
+  factor(fun_alltaxa_phylosig_PCoA_nonsig$df_phylosig$column_label%>%unique,
+         levels = fun_alltaxa_phylosig_PCoA_nonsig$df_phylosig$column_label%>%unique)
+
+#adjust order of factors
+heatmap_input$taxonomic_group<-
+  factor(heatmap_input$taxonomic_group, levels = levels(taxonomic_group_ordering))
+
+perm_70_phylosig_pct_df$taxonomic_group<-
+  factor(perm_70_phylosig_pct_df$taxonomic_group, levels = levels(taxonomic_group_ordering))
+
+# change order of the species to reflect newst phylogeny
+heatmap_input$Sp_abb_name<-factor(heatmap_input$Sp_abb_name, levels = Bra_tree_for_plot$tip.label)%>%
+  fct_rev() # rever order to keet At as the first
+  
+
+
+
+```
+
+## Trait_on_tree: filter df (significant interaction, abouheif) and plot heatmap
+this plot only contains the taxonomic groups that passed permanova/PCOA filtering
+these are further filtered to contain only taxa with significat sp*stress interactions and significat abouheif signals
+
+plots heatmaps + barplots with abouheif
+
+*ATTENTION* this is the chunk that defines teh filtering of taxonomic groups that will be showin in figure 1!
+```{r}
+
+
+
+#####  ------------------- #####
+#####  different taxonomic groups per stress (panel of 3 plots) #####
+#####  ------------------- #####
+
+
+
+# only keep taxonomic groups with...
+  # significant interaction 
+  # at least 15% variance explained by permanova (residual smaller than 0.85, simialr to K__fungi)
+  # PCoA_1 explains at least 1.15 time the variance of PCOA_2 (sufficient variance explained in 2 dimensions, simialr to K__fungi)
+  # the 3 factors (block, plant species, stress) presents unimodal distanes to centroids (p<0.05)
+  #  the 3 factors (block, plant species, stress) presents distanes to centroids distribution similar to k__Bacteria (p<0.05)
+
+
+taxonomic_groups_sig_interaction_Control<-
+  dplyr::filter(perm_70_phylosig_pct_df, 
+                pvalue_Sp_x_Stress<0.05,
+                residual_permanova<0.85,
+                var_explined_ratio>1.15,
+                unimodal_residues >=3,
+                residue_dist_simialr_to_K__Fungi >=3)
+
+
+taxonomic_groups_sig_interaction_MeJA<-
+  dplyr::filter(perm_70_phylosig_pct_df, 
+                pvalue_Sp_x_Stress<0.05, 
+                residual_permanova<0.85,
+                var_explined_ratio>1.15,
+                unimodal_residues >=3,
+                residue_dist_simialr_to_K__Fungi >=3)
+
+
+taxonomic_groups_sig_interaction_SA<-
+  dplyr::filter(perm_70_phylosig_pct_df, 
+                pvalue_Sp_x_Stress<0.05, 
+                residual_permanova<0.85,
+                var_explined_ratio>1.15,
+                unimodal_residues >=3,
+                residue_dist_simialr_to_K__Fungi >=3)
+
+
+#filter df to the taxonomies and samples above
+heatmap_input_filtered_interaction_Control<-
+  dplyr::filter(heatmap_input, 
+                heatmap_input$taxonomic_group %in% taxonomic_groups_sig_interaction_Control$taxonomic_group,
+                higher_lower_PC == "Higher_PC", 
+                Stress =="Control") 
+
+heatmap_input_filtered_interaction_MeJA<-
+  dplyr::filter(heatmap_input, 
+                heatmap_input$taxonomic_group %in% taxonomic_groups_sig_interaction_MeJA$taxonomic_group,
+                higher_lower_PC == "Higher_PC", 
+                Stress =="MeJA") 
+  
+
+heatmap_input_filtered_interaction_SA<-
+  dplyr::filter(heatmap_input, 
+                heatmap_input$taxonomic_group %in% taxonomic_groups_sig_interaction_SA$taxonomic_group,
+                higher_lower_PC == "Higher_PC", 
+                Stress =="SA") 
+  
+  
+#heatmap plots
+heatmap_PCoA_coord_005_Control<-
+ggplot(data = heatmap_input_filtered_interaction_Control, aes(y = Sp_abb_name, x = taxonomic_group, fill = scaled_PCoA))+
+  geom_tile()+
+  scale_y_discrete(limits=rev)+
+    scale_fill_viridis(option = "B")+
+    scale_color_viridis(option = "B")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 1, hjust=1))+
+  facet_wrap(~Stress)+
+  ylab(NULL)
+
+heatmap_PCoA_coord_005_MeJA<-
+ggplot(data = heatmap_input_filtered_interaction_MeJA, aes(y = Sp_abb_name, x = taxonomic_group, fill = scaled_PCoA))+
+  geom_tile()+
+  scale_y_discrete(limits=rev)+
+    scale_fill_viridis(option = "B")+
+    scale_color_viridis(option = "B")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 1, hjust=1))+
+  facet_wrap(~Stress)+
+  ylab(NULL)
+
+heatmap_PCoA_coord_005_SA<-
+ggplot(data = heatmap_input_filtered_interaction_SA, aes(y = Sp_abb_name, x = taxonomic_group, fill = scaled_PCoA))+
+  geom_tile()+
+  scale_y_discrete(limits=rev)+
+    scale_fill_viridis(option = "B")+
+    scale_color_viridis(option = "B")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 1, hjust=1))+
+  facet_wrap(~Stress)+
+  ylab(NULL)
+
+#arrange plots proportionally
+heamap_diff_taxonomic_group_per_stress<-
+ggarrange(heatmap_PCoA_coord_005_Control,
+          heatmap_PCoA_coord_005_MeJA,
+          heatmap_PCoA_coord_005_SA,
+          nrow = 1, 
+          common.legend = TRUE, legend = "bottom",
+          align = "h",  
+          widths = c(dim(heatmap_input_filtered_interaction_Control)[1],
+                     dim(heatmap_input_filtered_interaction_MeJA)[1],
+                     dim(heatmap_input_filtered_interaction_SA)[1]))
+
+
+
+#prepare barpltos to show on top of heatmaps
+
+barplot_Control_abouheif<-
+ggplot(data = taxonomic_groups_sig_interaction_Control, aes(x = taxonomic_group, y = value_Control_Higher_PC))+
+  geom_bar(stat = "identity", 
+           fill = colour_v[5],
+           alpha = if_else(condition = taxonomic_groups_sig_interaction_Control$pvalue_Control_Higher_PC<0.05,
+                     true = 1 ,
+                     false = 0.3))+
+    geom_point(aes(x = taxonomic_group, 
+                 y = r2_Mantel_Control), 
+             alpha = if_else(condition = taxonomic_groups_sig_interaction_Control$p_value_Mantel_Control<0.05,
+                     true = 1 ,
+                     false = 0.3),
+             size = 2)+
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        legend.position = "none")+
+  ylim(c(0,0.61))+
+#  ylim(c(0,1))+
+  ylab("Control - Bars: Abouheif's C Mean / Dots: Mantel R2")
+
+barplot_MeJA_abouheif<-
+ggplot(data = taxonomic_groups_sig_interaction_MeJA, aes(x = taxonomic_group, y = value_MeJA_Higher_PC))+
+  geom_bar(stat = "identity",
+           fill = colour_v[3],
+           alpha = if_else(condition = taxonomic_groups_sig_interaction_MeJA$pvalue_MeJA_Higher_PC<0.05,
+                   true = 1 ,
+                   false = 0.3))+
+    geom_point(aes(x = taxonomic_group, 
+                 y = r2_Mantel_MeJA), 
+             alpha = if_else(condition = taxonomic_groups_sig_interaction_MeJA$p_value_Mantel_MeJA<0.05,
+                     true = 1 ,
+                     false = 0.3 ),
+             size = 2)+
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        legend.position = "none")+
+  ylim(c(0,0.61))+
+  #  ylim(c(0,1))+
+    ylab("MeJA - Bars: Abouheif's C Mean / Dots: Mantel R2")
+
+
+barplot_SA_abouheif<-
+ggplot(data = taxonomic_groups_sig_interaction_SA, aes(x = taxonomic_group, y = value_SA_Higher_PC))+
+  geom_bar(stat = "identity", 
+           fill = colour_v[4],
+           alpha = if_else(condition = taxonomic_groups_sig_interaction_SA$pvalue_SA_Higher_PC<0.05,
+                  true = 1 ,
+                  false = 0.3))+
+  geom_point(aes(x = taxonomic_group, 
+                 y = r2_Mantel_SA), 
+             alpha = if_else(condition = taxonomic_groups_sig_interaction_SA$p_value_Mantel_SA<0.05,
+                     true = 1 ,
+                     false = 0.3 ),
+             size = 2)+
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+         legend.position = "none")+
+  ylim(c(0,0.61))+
+   # ylim(c(0,1))+
+    ylab("SA - Bars: Abouheif's C Mean / Dots: Mantel R2")
+
+
+
+
+#arrange plots proportionally
+barplot_abouheif_taxonomic_group_per_stress<-
+ggarrange(barplot_Control_abouheif,
+          barplot_MeJA_abouheif,
+          barplot_SA_abouheif,
+          nrow = 1, 
+          common.legend = TRUE, 
+          align = "h",  
+          widths = c(dim(heatmap_input_filtered_interaction_Control)[1],
+                     dim(heatmap_input_filtered_interaction_MeJA)[1],
+                     dim(heatmap_input_filtered_interaction_SA)[1]))
+
+
+#put barplots on top of heatmaps, proportionally
+barplots_Abouheif_heatmaps_PCoA<-
+ggarrange(barplot_abouheif_taxonomic_group_per_stress,
+          heamap_diff_taxonomic_group_per_stress,
+          nrow = 2,
+          heights = c(1,3),
+          align = "hv")
+
+
+
+
+#save heatmap, significant interactions and abouheif at each stress
+ggsave(barplots_Abouheif_heatmaps_PCoA, 
+       filename = "./14_Phylogenetic_distance/results/Results_April2023/trait_on_tree_FUN_heatmap_barplot_005Interaction_005Abouheif__PCratio125_residual085_unimodal2_SK2_mantelR2dot_overlap.pdf",
+     width = 275, 
+     height = 375, 
+     units = "mm")
+
+
+
+```
+
+

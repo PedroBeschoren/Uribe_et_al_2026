@@ -1,0 +1,439 @@
+---
+title: "MU_10_Machine_learning_ReRunningCode"
+author: "Pedro"
+date: "2025-07-02"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+This script is a step by step copy of https://github.com/PedroBeschoren/Family_experiment/blob/master/10_Machine_learning/code/10_check_RF_precision_metrics_MeJAvsControl_SAvsControl.Rmd made by Melissa to double checking of the code and identifying parts that could be cleaned.
+
+##Start of the code from Pedro
+this script will load 400k MeJa-VS-Control and SA-VS-Control boruta objects, with bacteria and fungi
+then it extracts fixed_boruta ASVs names, removing all species absent from the MY tree
+Then it runs the fisher analysis pipeline, and indicates the taxons highlighted
+
+Then, it can extract importan ASV features
+in the end of the script, we compare 20k boruta trees to 400k boruta trees
+
+
+
+# 10.0 -  load libraries 
+```{r results="hide"}
+# this will load all key libraries for the whole project
+source("./renv/0_load_libraries.R")
+
+
+
+# this will load all key libraries for the whole project
+library(metagMisc)
+library(dplyr)
+library(tibble)
+library(tidyverse)
+library(Boruta)
+library(phyloseq)
+library(caret)
+library(randomForest)
+library(parallel) # use parallel computing to speed up RF calculations
+library(pROC)
+
+# loads the custom functions used in this script
+source("./10_Machine_learning/code/Machine_Learning_custom_functions.R")
+
+
+
+
+# increases memory limit used by R
+memory.limit(size = 350000)
+
+
+```
+
+
+
+# 10.1 - load phyloseq objects
+```{r}
+
+# this will load the CSS 16S and ITS data as a list of two objects
+load("./Data/phyloseq_objects/CSS_BacFun_rhizoplane_HighFilt_ps_l.RData")
+
+######### split ps objects
+
+# split the original object by species
+ps_sp_l<-lapply(CSS_BacFun_rhizoplane_HighFilt_ps_l, function (x) 
+  phyloseq_sep_variable(x,variable = c("Sp_abb_name")))
+
+# filter  the original object to keep only brassicacea present in the MY tree
+ps_brassicaceae_BacFun_l<-lapply(CSS_BacFun_rhizoplane_HighFilt_ps_l, function (x) 
+  subset_samples(x, MY_tree_presence =="inside_MY_tree"))
+
+```
+
+# 10.2 - Define and extract RF-important ASVs
+
+Load boruta objects, fix them, apply Ds cutoff, define RF ASVs for 22sp, define RF ASVs for microiomes Type LI and TYpe LII (14sp+8sp)
+
+
+## 10.2.1 - load 400k boruta objects, put in single list
+```{r}
+#load MejA data
+load(file = "./10_Machine_learning/r_objects/Boruta_MeJA_bac_33sp_400k.RData")
+load(file = "./10_Machine_learning/r_objects/Boruta_MeJA_fun_33sp_400k.RData")
+
+# rename objects, remove old ones for memory saving
+Boruta_MeJA_bac_33sp<-Boruta_stress_bac_33sp
+Boruta_MeJA_fun_33sp<-Boruta_stress_fun_33sp
+rm(Boruta_stress_bac_33sp, Boruta_stress_fun_33sp)
+
+
+#load SA data
+load(file = "./10_Machine_learning/r_objects/Boruta_SA_bac_33sp_400k.RData")
+load(file = "./10_Machine_learning/r_objects/Boruta_SA_fun_33sp_400k.RData")
+
+# rename objects, remove old ones for memory saving
+Boruta_SA_bac_33sp<-Boruta_stress_bac_33sp
+Boruta_SA_fun_33sp<-Boruta_stress_fun_33sp
+rm(Boruta_stress_bac_33sp, Boruta_stress_fun_33sp)
+
+#put these objects into a 4-object list
+Boruta_BacFun_MeJASA_33sp_l<-list("Boruta_MeJA_bac_22sp" = Boruta_MeJA_bac_33sp,
+                                 "Boruta_SA_bac_22sp" = Boruta_SA_bac_33sp,
+                                 "Boruta_MeJA_fun_22sp" = Boruta_MeJA_fun_33sp,
+                                 "Boruta_SA_fun_22sp" = Boruta_SA_fun_33sp)
+
+#remove old objects
+rm(Boruta_MeJA_bac_33sp, Boruta_MeJA_fun_33sp, Boruta_SA_bac_33sp,Boruta_SA_fun_33sp)
+
+
+```
+
+## 10.2.2 - fix boruta objects and remove plant sp outside MY tree
+```{r}
+#fix boruta objects 
+#Note from MU: This is a function that modifies the finalDecision attribute of the Boruta object: https://search.r-project.org/CRAN/refmans/Boruta/html/TentativeRoughFix.html. "finalDecision" displays for each ASV one of three options, Confirmedd, Rejected or Tentative. Then this function Tentative rough fix uses median importance and importance of each ASV to do a strict cut to either confirmed or tentative
+Fixed_Boruta_BacFun_MeJASA_33sp_l<-lapply(Boruta_BacFun_MeJASA_33sp_l, function(x)
+  lapply(x, function(z)
+    TentativeRoughFix(z)))
+
+#define plant species inside MY tree
+sp_inside_MY_tree<-ps_brassicaceae_BacFun_l$Bac@sam_data$Sp_abb_name%>%unique
+
+# remove plant species outside MY tree
+Fixed_Boruta_BacFun_MeJASA_22sp_l<-lapply(Fixed_Boruta_BacFun_MeJASA_33sp_l, function(x)
+  x[as.character(sp_inside_MY_tree)])
+
+# check length and sp names
+lapply(Fixed_Boruta_BacFun_MeJASA_22sp_l, length)
+lapply(Fixed_Boruta_BacFun_MeJASA_22sp_l, names)
+
+# extract important ASV IDs
+Boruta_ASVs_22sp<-lapply(Fixed_Boruta_BacFun_MeJASA_22sp_l, function (z)
+  lapply(z, function(x)
+    Boruta::getSelectedAttributes(x)))
+
+# check histogram of ASVs IDs frequency
+lapply(Boruta_ASVs_22sp, function (x) x%>%unlist%>%table%>%hist)
+
+### attention: filter Ds here ####
+# Ds has too many bASVs on SA because of the strong SA effects. keep only to top quartile to reduce wegihts of this species in cross-comparisons
+Ds_bASVs_SA<-dplyr::filter(attStats(Fixed_Boruta_BacFun_MeJASA_22sp_l$Boruta_SA_bac_22sp$Ds), decision == "Confirmed") # important Ds bASVs in SA
+Ds_bASVs_SA_top_25<- dplyr::filter(Ds_bASVs_SA, medianImp >= summary(Ds_bASVs_SA$medianImp)[5]) # keep bASVs on the top quartile of importance
+
+Boruta_ASVs_22sp$Boruta_SA_bac_22sp$Ds<-rownames(Ds_bASVs_SA_top_25) # substitute the ~ 160 bASVs for the 40 most important bASVs
+
+# put all ASVs into a flat list without repetitions
+RF_ControlMeJA_ControlSA_ASVs_22sp<-lapply(Boruta_ASVs_22sp, function (x) x%>%unlist%>%unique)
+```
+
+## 10.2.3 - make a boxplot showing the Ds cutoff in imporatnt ASVs
+```{r}
+#get RF ASv importance into a list of dfs
+RF_importance_df_l_l<-
+lapply(Fixed_Boruta_BacFun_MeJASA_22sp_l, function(z)
+  lapply(z, function(x)
+  dplyr::filter(attStats(x), decision == "Confirmed")))
+
+#merge the list
+RF_importance_df_l<- 
+  lapply(RF_importance_df_l_l, function(x)
+    do.call("rbind", x)%>%
+      rownames_to_column(var = "Sp_abb"))
+
+# Bac_SA_Br is failing to add a on the snippet above here, I can't see why. bASV_1790 is present in the input object. this fix it via code
+RF_importance_df_l$Boruta_SA_bac_22sp[RF_importance_df_l$Boruta_SA_bac_22sp$Sp_abb=="Br",]$Sp_abb<-
+  paste0(RF_importance_df_l$Boruta_SA_bac_22sp[RF_importance_df_l$Boruta_SA_bac_22sp$Sp_abb=="Br",]$Sp_abb,
+         ".",
+         rownames(RF_importance_df_l_l$Boruta_SA_bac_22sp$Br)) 
+
+
+
+RF_importance_df<-
+    do.call("rbind", RF_importance_df_l)%>%
+      rownames_to_column(var = "Stress")
+
+#adjust column names and content
+RF_importance_df<-  
+  tidyr::separate(data = RF_importance_df,
+                  col = Sp_abb,
+                  into = c("Sp_abb", "ASV_ID"), 
+                  sep = "\\.",
+                  remove = FALSE)
+
+RF_importance_df$Stress<-gsub("Boruta_", "",RF_importance_df$Stress)
+RF_importance_df$Stress<-gsub('_22sp.*','',RF_importance_df$Stress)
+
+RF_importance_df<-  
+  tidyr::separate(data = RF_importance_df,
+                  col = Stress,
+                  into = c("Stress", "Kingdom"), 
+                  sep = "_",
+                  remove = FALSE)
+
+# adjust species names as a factor that mirrors phylogeny
+RF_importance_df$Sp_abb<-factor(RF_importance_df$Sp_abb, levels = levels(sp_inside_MY_tree ))
+
+#colour vector
+colour_v <- c("#F0E442", "#88CCEE", "#E69F00", "#009E73", "#999999")
+
+# boxplot of number of important ASVs with labels
+Ds_RF_imp_cutoff_NimpASVs<-
+RF_importance_df%>%
+  group_by(Sp_abb, Stress, Kingdom)%>%
+  dplyr::summarise(count = n())%>%
+  ggplot(aes(x = Stress, y = count, fill = Stress ))+
+  geom_boxplot(outlier.shape = NA, 
+               position=position_dodge(0.8), alpha = 0.5)+
+  geom_text_repel(aes(label = Sp_abb, color = Stress, fill = NULL),
+                   max.overlaps = 18,
+                   position = position_dodge(width = 0.75))+
+  theme_bw()+
+  facet_wrap(~Kingdom, ncol = 1, nrow = 2 )+
+    scale_discrete_manual(aesthetics = c("color", "fill"),
+                        values = colour_v[3:4])+
+    xlab("Treatment")+
+  labs(fill = "Treatment", color ="Treatment" )+
+  ylab("Number of ASVs tagged as important by Boruta")
+
+
+# here we see that Ds is almost 20 times the median value
+RF_importance_df_summary_count<-
+RF_importance_df%>%
+  group_by(Sp_abb, Stress, Kingdom)%>%
+  dplyr::summarise(count = n())
+
+RF_importance_df_summary_count%>%
+  group_by(Stress, Kingdom)%>%
+  dplyr::summarise(median_count = median(count))
+
+
+
+# boxplot as ASV importance per sp with jitter
+Ds_RF_imp_cutoff_topquartile<-
+ggplot(data = RF_importance_df, aes(x = Sp_abb, y = meanImp, fill = Stress ))+
+  geom_boxplot(outlier.shape = NA, 
+               position=position_dodge(0.8), alpha = 0.5)+
+ geom_point(position = position_jitterdodge(jitter.width = 0.2,
+                                             dodge.width = 0.7),
+             aes(fill = Stress),  alpha = 0.3,
+             pch = 21)+
+  scale_discrete_manual(aesthetics = "fill",
+                        values = colour_v[3:4])+
+  theme_bw()+
+  labs(fill = "Treatment")+
+  xlab("Plant Species")+
+  ylab("Mean importance of ASVs tagged as important by Boruta")+
+  facet_wrap(~Kingdom, ncol = 1, nrow = 2 )
+
+
+# put the two plots above in a panel and save
+ds_imp_cutooff_pannel<-
+ggarrange(Ds_RF_imp_cutoff_NimpASVs, 
+          Ds_RF_imp_cutoff_topquartile, 
+          ncol = 2, 
+          labels = "AUTO", common.legend = TRUE, legend = "top",
+          widths = c(0.4, 1.6))
+```
+
+
+```{r}
+#export figure
+ggsave(ds_imp_cutooff_pannel,
+       filename = "./10_Machine_learning/results/Ds_RF_imp_cutoff_pannel.svg", 
+       width = 260,
+       height = 260, 
+       units = "mm")
+
+```
+
+# 10.3 - Check and Plot Model Precision
+
+## 10.3.1 - Load Cross-Validation Models (25 Replicates), Define Functions and Vectors
+```{r}
+# Load MeJA models into the environment (can take a while)
+load(file = "./10_Machine_learning/r_objects/CV_25replicated_MeJA_400k_l_l_33sp.RData")
+
+# Load SA models into the environment (can take a while)
+load(file = "./10_Machine_learning/r_objects/CV_25replicated_SA_400k_l_l_33sp.RData")
+
+# Define vectors of plant species and phylogenies
+Sp_Lineage_Walden <- CSS_BacFun_rhizoplane_HighFilt_ps_l$Bac@sam_data$Sp_Lineage_Walden
+sp_vector <- CSS_BacFun_rhizoplane_HighFilt_ps_l$Bac@sam_data$Sp_abb_name
+MY_tree_vector <- CSS_BacFun_rhizoplane_HighFilt_ps_l$Bac@sam_data$MY_tree_presence
+lineage_sp_df <- as.data.frame(Sp_Lineage_Walden)
+lineage_sp_df$Sp_abb_name <- sp_vector
+lineage_sp_df$MY_tree_vector <- MY_tree_vector
+lineage_sp_df <- lineage_sp_df %>% unique()
+
+# Function to extract CV metrics
+extract_accuracy <- function(CV_output_l) {
+  cv_metrics <- map(CV_output_l, 3)
+  accuracy <- unlist(map(cv_metrics, 1)) # Accuracy
+  kappa <- unlist(map(cv_metrics, 2))   # Kappa
+  AccuracyPValue <- unlist(map(cv_metrics, 6)) # Accuracy P-value
+  model_metrics <- as.data.frame(accuracy)
+  model_metrics$kappa <- kappa
+  model_metrics$AccuracyPValue <- AccuracyPValue
+  return(model_metrics)
+}
+
+# Function to extract metrics from 25 replicates, returning a data frame
+replicated_CV_metrics_extraction<-function(CV_output_l){
+list_precison<-list()
+for(i in 1:25){
+list_precison[i]<-lapply(CV_output_l[2,i], function(x)
+  extract_accuracy(CV_output_l = x))
+  }
+list_precison
+
+precison_df<-do.call(rbind, list_precison)
+precison_df<-rownames_to_column(precison_df, var = "Sp_abb_name")
+precison_df$Sp_abb_name<-as.factor(gsub(pattern = "[0-9]", replacement = "",  precison_df$Sp_abb_name))
+
+precison_df<-left_join(x = precison_df, 
+                       y = lineage_sp_df,
+                       by = "Sp_abb_name" )
+
+precison_df$Sp_abb_name<-factor(x = precison_df$Sp_abb_name, levels = levels(lineage_sp_df$Sp_abb_name))
+
+return(precison_df)
+
+}
+```
+
+
+## 10.3.2 - Extract Key CV Metrics of MeJA Models
+```{r}
+# Run the custom functions to extract accuracy, kappa, and p-values
+RF_accuracy_MeJA_df <- lapply(CV_25replicated_MeJA_400k_l_l_33sp, replicated_CV_metrics_extraction)
+
+# Get a table with summarized results
+RF_accuracy_MeJA_df$replicated_model_400k_bac_MeJA %>%
+  group_by(Sp_abb_name) %>%
+  summarise(mean_accuracy = mean(accuracy),
+            median_accuracy = median(accuracy),
+            sd_accuracy = sd(accuracy))
+
+# Remove MeJA models from environment
+rm(CV_25replicated_MeJA_400k_l_l_33sp)
+```
+
+
+## 10.3.3 - Extract Key CV Metrics of SA Models
+```{r}
+# Run the custom functions to extract accuracy, kappa, and p-values
+RF_accuracy_SA_df <- lapply(CV_25replicated_SA_400k_l_l_33sp, replicated_CV_metrics_extraction)
+
+# Get a table with summarized results
+RF_accuracy_SA_df$replicated_model_400k_bac_SA %>%
+  group_by(Sp_abb_name) %>%
+  summarise(mean_accuracy = mean(accuracy),
+            median_accuracy = median(accuracy),
+            sd_accuracy = sd(accuracy))
+
+# Remove SA models from environment
+rm(CV_25replicated_SA_400k_l_l_33sp)
+```
+
+### 10.3.4 -  Merge MeJA and SA Data Frames for a Single Data Frame
+```{r}
+# Add Stress column to each data frame
+RF_accuracy_MeJA_df <- lapply(RF_accuracy_MeJA_df, function(x) {
+  x$Stress <- "MeJA"
+  return(x)
+})
+RF_accuracy_SA_df <- lapply(RF_accuracy_SA_df, function(x) {
+  x$Stress <- "SA"
+  return(x)
+})
+
+# Merge data frames
+RF_accuracy_MeJASA_df <- mapply(function(x, y) rbind(x, y),
+                                x = RF_accuracy_MeJA_df,
+                                y = RF_accuracy_SA_df,
+                                SIMPLIFY = FALSE)
+
+# Add a kappa classification as a categorical result
+RF_accuracy_MeJASA_df <- lapply(RF_accuracy_MeJASA_df, function(x)
+  mutate(.data = x,
+         kappa_class = factor(ifelse(
+           kappa >= 0.81, "Almost_perfect",
+           ifelse(kappa >= 0.61 & kappa < 0.81, "Substantial",
+                  ifelse(kappa >= 0.41 & kappa < 0.61, "Moderate",
+                         ifelse(kappa >= 0.21 & kappa < 0.41, "Fair",
+                                ifelse(kappa > 0 & kappa < 0.21, "Slight", "No_agreement"))))),
+           levels = c("Almost_perfect", "Substantial", "Moderate", "Fair", "Slight", "No_agreement"))
+  ))
+
+# Adjust p-values
+RF_accuracy_MeJASA_df <- lapply(RF_accuracy_MeJASA_df, function(x) {
+  x$AccuracyPValue.adjusted <- p.adjust(x$AccuracyPValue, method = "fdr")
+  return(x)
+})
+
+# Calculate mean accuracy of valid models for barplot labels
+RF_accuracy_MeJASA_df <- lapply(RF_accuracy_MeJASA_df, function(x)
+  x %>%
+    group_by(Sp_abb_name, Stress) %>%
+    mutate(mean_accuracy_all_models = mean(accuracy)))
+
+# Specify Bac/Fun data frames
+RF_accuracy_MeJASA_df$replicated_model_400k_bac_MeJA$Kingdom <- "Bacteria"
+RF_accuracy_MeJASA_df$replicated_model_400k_fun_MeJA$Kingdom <- "Fungi"
+```
+
+
+
+### 10.3.5 -  visualize model's precison, p and kappa
+
+```{r}
+
+# barplot showing classes of kappa agreement of valid models, number of models with pvalue for accuracy>0.05, and precision on bartop label
+plot_RF_22sp_precison<-lapply(RF_accuracy_MeJASA_df, function (x)
+  ggplot(filter(x, MY_tree_vector == "inside_MY_tree", AccuracyPValue.adjusted <0.057) , # adjusted p values of 0.566 include fungal models with a single misclassification. if we remove the species outside the MY, this won't be a problem
+                                  aes(y = Sp_abb_name ))+
+    geom_bar(position = "stack", aes(fill = kappa_class))+
+    scale_y_discrete(limits=rev)+
+    scale_fill_viridis(discrete = TRUE, direction = -1)+
+    facet_wrap("Stress")+
+     geom_text(stat = "count", aes(label = round(mean_accuracy_all_models, digits = 2)))+
+    theme_bw())
+
+#put bac and fun side by side
+RF_precison_plot<-
+ggarrange(plot_RF_22sp_precison$replicated_model_400k_bac_MeJA,
+          plot_RF_22sp_precison$replicated_model_400k_fun_MeJA,
+          ncol = 2,labels = c("Bacteria", "Fungi"),common.legend = TRUE, hjust = 0, legend="bottom")
+
+
+
+
+# save plot externally
+ggsave(RF_precison_plot,
+       filename = "./10_Machine_learning/results/RF_22sp_kappa_precision_p_MeJa_SA.pdf",
+       width = 20,
+       height = 20,
+       units = "cm")
+
+```
+

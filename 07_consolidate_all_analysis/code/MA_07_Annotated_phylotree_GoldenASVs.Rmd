@@ -1,0 +1,1316 @@
+---
+title: "Annotated phylotree for Golden ASVs"
+author: "Marcela Aragon"
+date: "6/11/2023"
+output: html_document
+---
+
+This script leads to Figure 3 and Supplementary Figure S19. It creates the .txt files to draw the phylogenetic tree with the metadata in iTOL.
+
+# Load libraries
+
+```{r results="hide"}
+
+#Set working directory to project directory 
+getwd() #ok
+
+#let's deactivate renv for this script
+renv::deactivate()
+
+#Load libraries
+
+#microbiome data
+library(phyloseq)
+library(microbiome)
+library(microbiomeutilities) #ternary plots
+library(vegan)
+library(Biostrings) #sequence data
+
+#data management
+library(tidyr)
+library(dplyr)
+library(tibble)
+library(stringr)
+library(purrr) #to handle lists
+library(itol.toolkit)#handles data for iTOL use 
+library(varhandle) #rm.all.but() function to clean
+
+#plots
+library(ggpubr)
+library(ggplot2)
+library(RColorBrewer) #nice colors for plots
+library(phytools)
+library(ape) #to handle phylogenetic trees 
+
+
+```
+
+
+# 16S
+
+(Optional!!)
+If you want to skip running the code and just have the results from line 57 until line 691 just upload this Rdata that contains the saved environment.
+
+```{r}
+
+load("./07_consolidate_all_analysis/Results/16S_R-environment.RData")
+
+```
+
+Otherwise, continue here: 
+
+## Phyloseq
+
+```{r}
+
+#load Golden ASVs names
+load("./07_consolidate_all_analysis/Results/DA_RF_NM_ASVs_intersect.RData")
+
+#check
+DA_RF_NM_ASVs_intersect #4 lists, one per treatment per 16S or ITS
+
+#### 16S ####
+MeJA_asvs <- DA_RF_NM_ASVs_intersect$MeJA_Bac_GoldenASVs #130
+SA_asvs <- DA_RF_NM_ASVs_intersect$SA_Bac_GoldenASVs #138
+
+#Now I need to get the unique names 
+bac_sig_asvs <- c(MeJA_asvs, SA_asvs) #268
+bac_sig_asvs <- unique(bac_sig_asvs) #234 unique ones, there are 34 shared ASVs 
+bac_intersect <- intersect(MeJA_asvs, SA_asvs) #get the shared ones 
+
+# this will load the CSS-normalized 16S and ITS data as a list of two objects
+load("./Data/phyloseq_objects/unnormalized_BacFun_rhizoplane_HighFilt_ps_l.RData")
+unnormalized_BacFun_rhizoplane_HighFilt_ps_l
+
+#Now, I need to remove all those samples that belong to guest species + others not present in Kasper's tree
+Spp_abb_name_Kasper <- c("Hi","Sal","Al","Tg","Bo_M","Dt","Ds","Br","Ia","Cas",
+                         "Ec","Es","At","Mm"," Si"," Lr","Bi","Lm","Bv", "Co", "Bn","Sar", "It") 
+
+ps_Bac <- subset_samples(unnormalized_BacFun_rhizoplane_HighFilt_ps_l$Bac,
+                       Sp_abb_name %in% Spp_abb_name_Kasper) #only those plant sp present in the tree
+
+#prune ps to keep only those that belong to the Golden ASVs
+ps_golden <- prune_taxa(bac_sig_asvs, ps_Bac)
+
+#check
+ps_golden #ok, 234
+
+#remove big ps object to clear up space, you'll load it later for fungi
+rm(ps_Bac, unnormalized_BacFun_rhizoplane_HighFilt_ps_l)
+
+```
+
+### Make new bacterial phylogenetic tree
+For now we skip this part as it has already been done, go directly to line 133.
+```{r}
+
+#get the sequences and save them as FASTA format
+#ps_golden %>%
+#refseq() %>%
+#Biostrings::writeXStringSet("./07_consolidate_all_analysis/Results/Annotated_microbial_phylogenetic_tree/16S/16S_goldenASVs_sequences.fasta",
+#             append=FALSE,compress=FALSE,
+#             compression_level=NA, format="fasta")
+
+
+#Go to MAFTT [...]
+```
+
+As phylogenetic tree from Qiime2 sometimes is not very accurate for the microbial phylogeny I will first export the sequences from the golden_asvs and then follow a similar approach to the `Phylogenetic_analysis_good.Rmd` (you can find it in "./Plant_phylogeny/Code/") but in the HPC Anunna. 
+
+I did the alignment in MAFFT online (https://mafft.cbrc.jp/alignment/server/index.html) and then used that alignment in fasta format to run the following slurm script to run IQ-tree in the HPC which means that iqtree will run with a DNA sequence type, 10,000 replicates in bootstrap analysis and that finds the best substitution model automatically.
+
+```{bash}
+
+#!/bin/bash -login
+
+#SBATCH --time=4:00:00
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=4G
+#SBATCH --job-name=16S_tree
+#SBATCH --output=16S_tree.output
+
+
+cd /lustre/nobackup/INDIVIDUAL/arago004/IQ_tree/16S ##place where I had the .fasta alignment
+
+iqtree2 -s 16S_alignment_MAFFT.fasta -st DNA -m MFP -bb 10000 -nt AUTO ##
+
+```
+
+Once I got the tree (it took less than 1 hour) I imported back to R
+
+```{r}
+#Import tree
+tree_16S <- read.tree("./07_consolidate_all_analysis/Results/Annotated_microbial_phylogenetic_tree/16S/16S_alignment_MAFFT.fasta.treefile")
+
+#check
+tree_16S
+plot(tree_16S) #good 
+tree_16S <- multi2di(tree_16S) #root it
+
+#save it in .tre format to be imported in iTOL
+#ape::write.tree(tree_16S, "./07_consolidate_all_analysis/Results/Annotated_microbial_phylogenetic_tree/16S_28-08-24/16S_tree.tre")
+
+#change tree in ps object 
+ps_golden@phy_tree <- tree_16S
+
+```
+
+## Taxonomy dataframe
+
+```{r}
+#make a new df with two columns; one for MeJA and another one for SA
+df_bac_sig_asvs <- as.data.frame(bac_sig_asvs) 
+colnames(df_bac_sig_asvs) <- "asv"                   
+df_bac_sig_asvs <- df_bac_sig_asvs %>%
+                   mutate(MeJA=case_when(asv %in% MeJA_asvs ~ "1",
+                                         TRUE ~ "-1"))%>% #0 is for empty shape, -1 is no shape
+                   mutate(SA=case_when(asv %in% SA_asvs ~ "1",
+                                         TRUE ~ "-1"))
+
+#let's get the taxonomy
+#clean it first
+tax_table(ps_golden)[, colnames(tax_table(ps_golden))] <- gsub(tax_table(ps_golden)[, colnames(tax_table(ps_golden))], pattern = "[a-z]__", replacement = "")
+
+#put it in a df 
+df_taxonomy <- as.data.frame(ps_golden@tax_table)
+order_asvs <- rownames(df_taxonomy) #get order of rows to keep using it for rest of df's
+
+#re-order sig_asvs df 
+df_bac_sig_asvs <- df_bac_sig_asvs %>%
+                   column_to_rownames(var="asv") #first make new rownames
+#now order it 
+df_bac_sig_asvs <- df_bac_sig_asvs[order(match(rownames(df_bac_sig_asvs),
+                                   order_asvs)), , drop=FALSE] 
+
+#now you can merge df's
+df_complete <- cbind(df_bac_sig_asvs, df_taxonomy)
+df_complete <- df_complete %>% select(-c(Species,Confidence)) #remove non-informative columns 
+
+```
+
+## Option 1: L2FC per Sp from Melissa [Not used for iTOL]
+
+```{r}
+
+#load df with log2-fold change
+load("./07_consolidate_all_analysis/r_objects/MU_HeatmapsGoldenASVs/lfcres_GoldenASVs_FinalDF_l_replaceNA.RData")
+
+#check
+lfcres_GoldenASVs_FinalDF_l_replaceNA
+
+#first, only MeJA
+lfc_MeJA <- lfcres_GoldenASVs_FinalDF_l_replaceNA$lfcres_df_MeJA_Bac
+
+#add MeJA suffix
+lfc_MeJA <- lfc_MeJA %>% 
+            mutate(across(everything(), ~ na_if(., 0.00)))%>% #first, change 0.0 to NA's
+            rename_with(~ paste0(., "_MeJA"))
+
+#let's make a column with the amount of times an ASV was significant
+#(if 0.0 I asume it was NA and therefore not significant)
+lfc_average <- lfc_MeJA %>% 
+             mutate(LFC_average_MeJA = rowMeans(., na.rm=T))%>%  #get average
+             select(LFC_average_MeJA)
+
+lfc_ocurrences <- lfc_MeJA %>% 
+             mutate(num_sp_sig_MeJA= rowSums(!is.na(.)))%>%
+             mutate(num_sp_NA_MeJA=rowSums(is.na(.)))%>% 
+             mutate(negative_lfc_MeJA=rowSums(lfc_MeJA < 0, na.rm=T))%>% 
+             mutate(positive_lfc_MeJA=num_sp_sig_MeJA-negative_lfc_MeJA) 
+
+#add the average value
+lfc_average$ASV <- rownames(lfc_average)
+lfc_ocurrences$ASV <- rownames(lfc_ocurrences)
+lfc_MeJA <- left_join(lfc_ocurrences, lfc_average) 
+lfc_MeJA <- lfc_MeJA %>% relocate(ASV)
+
+
+#then, SA
+lfc_SA <- lfcres_GoldenASVs_FinalDF_l_replaceNA$lfcres_df_SA_Bac
+
+#add SA suffix
+lfc_SA <- lfc_SA %>% 
+            mutate(across(everything(), ~ na_if(., 0.00)))%>% #first, change 0.0 to NA's
+            rename_with(~ paste0(., "_SA"))
+
+#let's make a column with the amount of times an ASV was significant
+#(if 0.0 I asume it was NA and therefore not significant)
+lfc_average <- lfc_SA %>% 
+             mutate(LFC_average_SA = rowMeans(., na.rm=T))%>%  #get average
+             select(LFC_average_SA)
+
+lfc_ocurrences <- lfc_SA %>% 
+             mutate(num_sp_sig_SA= rowSums(!is.na(.)))%>%
+             mutate(num_sp_NA_SA=rowSums(is.na(.)))%>% 
+             mutate(negative_lfc_SA=rowSums(lfc_SA < 0, na.rm=T))%>% 
+             mutate(positive_lfc_SA=num_sp_sig_SA-negative_lfc_SA) 
+
+#add the average value
+lfc_average$ASV <- rownames(lfc_average)
+lfc_ocurrences$ASV <- rownames(lfc_ocurrences)
+lfc_SA <- left_join(lfc_ocurrences, lfc_average) 
+lfc_SA <- lfc_SA %>% relocate(ASV)
+
+#Now, let's join the df's
+lfc <- full_join(lfc_MeJA, lfc_SA)
+
+#Let's make a new df first with MeJA information
+df_complete #our dataframe with metadata
+lfc #the df we want to add
+
+#add column named ASV
+df_complete$ASV <- rownames(df_complete) #make new column 'ASV'
+
+#join df 
+df_complete <- full_join(df_complete, lfc, by="ASV")
+
+#order
+df_complete <- df_complete %>% 
+                select(-OTU) %>% 
+                dplyr::relocate(ASV, MeJA, SA)
+
+rownames(df_complete) <- df_complete$ASV
+
+
+```
+
+I think I stopped here because I didn't know how to integrate both values, perhaps an idea is to not include the lfc value if it was not significant, to include the average per species and add as metadata in how many species it was positive and negative as it becomes a problem to reduce it to a single value if we are talking about 22 different species. 
+
+## Option 2: LFC from Ancombc [This one was used]
+
+Let's try to use Ancom just to calculate the log-fold change per ASVs between Control and Stress-treatments. This will be an average value across species (I think this was the way Pedro plotted the heattrees but needs confirmation)
+
+```{r}
+
+#This code comes from the psf_microbiome project
+
+ps_golden #this is my ps object with golden asvs for Bac
+
+library(ANCOMBC)
+
+#Just for Bac-GoldenASVs but using 3 groups
+set.seed(123)
+ancom <- ANCOMBC::ancombc(phyloseq = ps_golden, 
+                      formula = "Stress", 
+                      p_adj_method = "fdr", #same as "BH" Benjamini & Hochberg
+                      #zero_cut = 1, #default setting
+                      lib_cut = 0, 
+                      prv_cut=0, #otherwise removes some ASVs
+                      group = "Stress", 
+                      struc_zero = TRUE, #with structural zero's
+                      neg_lb = FALSE, #classifies structural zero's if it's zero and not its asymptotic lower bound 
+                      tol = 1e-5,               
+                      max_iter = 100, 
+                      conserve = TRUE, 
+                      alpha = 0.05,
+                      global=TRUE)
+
+head(ancom$res$lfc) #LFC
+
+#Get LFC values
+lfc_ancom <- ancom$res$lfc #log-fold change according to control --> not removing any sample
+
+#### Now I have a single value of LFC per each golden ASV for both MeJA and SA vs Control in the lfc object ####
+lfc_ancom
+
+lfc_ancom <- lfc_ancom %>% 
+             mutate(ASV=taxon)%>% 
+             select(c(ASV, StressMeJA, StressSA))%>%
+             rename_with(~ paste0(., "_ancombc"))
+colnames(lfc_ancom)[1] <- "ASV"
+
+#finally, join it with full df 
+df_complete <- left_join(df_complete, lfc_ancom)
+
+#save df
+save(df_complete, file="./07_consolidate_all_analysis/Results/Annotated_microbial_phylogenetic_tree/16S/df_complete.Rdata")
+
+```
+
+
+
+## iTOL
+
+
+### Metadata in iTOL format
+
+To add annotations iTOL works in layers (see https://itol.embl.de/help.cgi#anno), therefore we'll need one dataframe in .txt format per type of annotation we would like to see. The package `itol.toolkit::` helps you create dataframes in iTOL format. 
+
+First, arrange data and colors to be used 
+```{r}
+
+#load full df (this contains ANCOMBC results)
+load(file="./07_consolidate_all_analysis/Results/Annotated_microbial_phylogenetic_tree/16S/df_complete.Rdata")
+rownames(df_complete) <- df_complete$ASV
+
+#First gather what you need 
+df_complete #our dataframe with taxonomy and lfc data for both MeJA and SA
+tree_16S #our tree
+
+#Set-up colors
+
+#### colors for Treatment ####
+color_MeJA <- "#E69F00"
+color_SA <- "#009E73"
+color_treatment <- c("#E69F00","#009E73")
+
+```
+
+
+#### Treatment
+
+MeJA (yellow dots)
+```{r}
+Treatment_MeJA <- df_complete %>%
+                  dplyr::select(ASV,MeJA)%>%
+                  mutate(id=ASV)%>% #make new column named "ID" for iTOL
+                  relocate(id)%>% #put it first
+                  select(-ASV) #remove repeated column
+  
+DF1 <- itol.toolkit::create_unit(data = Treatment_MeJA, 
+                         key = "DF1_Treatment-MeJA", 
+                         type = "DATASET_BINARY", #type of dataset
+                         tree = tree_16S)
+
+DF1@field$colors <- color_MeJA #change colors
+DF1@field$shapes #circle is 2, so ok
+
+#changed shape by hand in the .txt file, from circle(2) to triangle(5)
+
+#save it
+
+#itol.toolkit::write_unit(DF1, #"./07_consolidate_all_analysis/Results/Annotated_microbial_phylogenetic_tree/16S/")
+
+```
+
+SA (green dots)
+```{r}
+Treatment_SA <- df_complete %>%
+                  dplyr::select(ASV,SA)%>%
+                  mutate(id=ASV)%>% #make new column named "ID" for iTOL
+                  relocate(id)%>% #put it first
+                  select(-ASV) #remove repeated column
+  
+DF2 <- itol.toolkit::create_unit(data = Treatment_SA, 
+                         key = "DF2_Treatment-SA", 
+                         type = "DATASET_BINARY", #type of dataset
+                         tree = tree_16S)
+
+DF2@field$colors <- color_SA #change colors
+DF2@field$shapes #check
+
+#save it
+#itol.toolkit::write_unit(DF2, #"./07_consolidate_all_analysis/Results/Annotated_microbial_phylogenetic_tree/16S/")
+
+```
+
+#### Genus
+
+Written genus name with number of ASV (Genus-Number)
+```{r}
+
+df_Genus <- df_complete %>%
+             dplyr::select(Genus)%>%
+             mutate(id=rownames(.))%>% #make new column named "ID" for iTOL
+             relocate(id) #put it first
+
+#replace Genus names with names of ASV and add number to Genus so its clear that it's different ASVs (Marcel's suggestion)
+#it also replaces NA's by the name of the ASV
+df_Genus <- df_Genus %>% mutate(number=str_split_i(df_Genus$id, "_", 2))%>% #get number of ASV
+                                mutate(Genus=paste(.$Genus, .$number, sep= "-"))%>% #make new with number and genus
+                                mutate(Genus=gsub("NA", "bASV", .$Genus))%>%
+                                dplyr::select(-number) #ok
+
+#Fix very long name of Allorhizobium-Neorhizobium-Pararhizobium-Rhizobium
+#change names
+df_Genus$Genus <- gsub(df_Genus$Genus, pattern = "Allorhizobium-Neorhizobium-Pararhizobium-Rhizobium", replacement = "Rhizobium_group")
+
+#make df 
+DF3 <- create_unit(data = df_Genus,
+                       key = "DF3_label_Genus",
+                       type = "LABELS",
+                       tree = tree_16S)
+
+#itol.toolkit::write_unit(DF3, #"./07_consolidate_all_analysis/Results/Annotated_microbial_phylogenetic_tree/16S/")
+
+```
+
+#### Phylum
+How to extend color palettes: #https://www.datanovia.com/en/blog/easy-way-to-expand-color-palettes-in-r/
+```{r}
+
+df_Phylum <- df_complete %>%
+             dplyr::select(Phylum)%>%
+             mutate(id=rownames(.))%>% #make new column named "ID" for iTOL
+             relocate(id) #put it first
+          
+df_Phylum[is.na(df_Phylum)] <- "Not_assigned" #doesn't work if there's an NA
+        
+#add color to Phylum
+Phylum <- unique(df_Phylum$Phylum) 
+colorCount <- 15
+color_phylum <- colorRampPalette(brewer.pal(colorCount, name = 'Set3'))(colorCount) #gives you a palette
+color_phylum #copy-paste output so the colors can be seen
+color_phylum <- c("#8DD3C7", "#E6F5B7", "#D9D7C9", "#D3A5B4", "#E9877F", "#88ADCC", "#D9B382", "#D8C965", "#000001", "#F9CDE4", "#DED7DA", "#C69FC7", "#C2ADC5", "#D6EBB2","#FFED6F")
+
+#make it a df
+df_Phylum_color <- data.frame(Phylum, color_phylum)
+
+#merge with df_Phylum
+df_Phylum <- df_Phylum%>%
+             dplyr::inner_join(df_Phylum_color)
+
+#option of just lines
+#DF4 <- itol.toolkit::create_unit(data = df_Phylum, 
+#                      key = "DF4_Phylum_colors", 
+#                      type = "TREE_COLORS", 
+#                      subtype = "clade",
+#                      size_factor=10,
+#                      tree = tree_16S)
+
+#option with circles at the end
+DF4 <- itol.toolkit::create_unit(data = df_Phylum, 
+                      key = "DF4_Phylum_colors", 
+                      type = "DATASET_SYMBOL",
+                      position=1,
+                      tree = tree_16S,
+                      fill=1)
+
+DF4@specific_themes$basic_plot$size_max <- 4
+
+#change it for legend
+DF4@common_themes$legend$shapes <- c("2", "2", "2", "2","2", "2","2", "2","2", "2","2", "2","2", "2","2")
+DF4@common_themes$legend$shape_scales <- c(1,1,1,1,1,1,1,1,1,1,1,1,1,1)
+DF4@common_themes$legend$horizontal <- "1"
+
+#save it
+#itol.toolkit::write_unit(DF4, #"./07_consolidate_all_analysis/Results/Annotated_microbial_phylogenetic_tree/16S/")
+
+```
+This works to color the tips, but not to have a legend I don't know why, Info has to be added by hand.
+
+#### Class
+
+```{r}
+
+df_Class<- df_complete %>%
+             dplyr::select(Class, Phylum)%>%
+             mutate(id=rownames(.))%>% #make new column named "ID" for iTOL
+             relocate(id) #put it first
+          
+df_Class[is.na(df_Class)] <- "Not_assigned" #doesn't work if there's an NA
+ 
+#merge with df_Phylum
+df_Class2 <- df_Class%>%
+             dplyr::inner_join(df_Phylum_color)%>%
+             dplyr::rename(color_class=color_phylum)
+
+#get unique combinations
+df_Class3 <- df_Class2 %>% distinct(Phylum, Class, color_class)%>% arrange(Phylum, Class)
+
+#Now, replace colors in those that have more than one class per Phylum
+
+"#E9877F"
+Acidobacteriota <-  c("#E89586","#E97C76", "#E9807A", "#E98B84")
+"#D9D7C9"
+Actinobacteriota <- c("#D7D5C7","#DBD9CC")
+"#8DD3C7"
+Proteobacteria <- c("#8ED6CA","#A0E2D6")
+
+#replace values 
+df_Class4 <- df_Class3 %>% mutate(color_class = case_when(
+  Class == "Acidobacteriae" ~ Acidobacteriota[1],
+  Class == "Blastocatellia" ~ Acidobacteriota[2],
+  Class == "Holophagae" ~ Acidobacteriota[3],
+  Class == "Vicinamibacteria" ~ Acidobacteriota[4],
+  Class == "Acidimicrobiia" ~ Actinobacteriota[1],
+  Class == "Alphaproteobacteria" ~ Proteobacteria[1],
+  Class == "Gammaproteobacteria" ~ Proteobacteria[2],
+  TRUE ~ color_class
+)) %>% select(-Phylum)
+
+#Now, make it a single df 
+df_Class5 <- df_Class %>% 
+             inner_join(df_Class4)%>%
+             select(-Phylum)
+
+#prepare df for iTOL
+DF5 <- itol.toolkit::create_unit(data = df_Class5, 
+                      key = "DF5_Class_colors", 
+                      type = "TREE_COLORS", 
+                      subtype = "range",
+                      tree = tree_16S)
+
+#save it
+#itol.toolkit::write_unit(DF5, #"./07_consolidate_all_analysis/Results/Annotated_microbial_phylogenetic_tree/16S/")
+
+```
+
+####LFC-1: Values from Meli
+
+```{r}
+
+#For this, first you'll take the summary values of the L2FC value per ASV per stress and this will be
+#the input for iTOL (same as Pedro did)
+
+df_lfc <- df_complete %>% 
+          select(ASV,LFC_average_MeJA, LFC_average_SA)%>%
+          dplyr::rename(id=ASV)
+
+#make df 
+DF6 <- create_unit(data = df_lfc,
+                       key = "DF6_LFC_MeJA-SA_Heatmap",
+                       type = "DATASET_HEATMAP",
+                       tree = tree_16S)
+
+DF6@data$tip[DF6@data$tip == 0] <- NA #replace 0's for NAs
+
+#select colors 
+DF6@specific_themes$heatmap$color$min <- "#2986cc"
+DF6@specific_themes$heatmap$color$max <- "#ff0000"
+DF6@specific_themes$heatmap$color$mid <- "#ebeceb"
+DF6@specific_themes$heatmap$value$mid <- 0
+DF6@specific_themes$heatmap$color$nan <- "#FFFFFF" #if NA, it will be blank
+
+DF6@specific_themes$heatmap$tree$tree_display <- 0 #no display of tree in heatmap
+
+#final check
+DF6
+
+#save it
+#itol.toolkit::write_unit(DF6, #"./07_consolidate_all_analysis/Results/Annotated_microbial_phylogenetic_tree/16S/")
+
+```
+
+####LFC-2: Values from ANCOMBC
+
+The difference is that it calculates the overall LFC of stress vs control per ASV, without taking species into account (in order to have an average value)
+
+```{r}
+
+colnames(df_complete)
+
+df_lfc_ancom <- df_complete %>% 
+                select(ASV,StressMeJA_ancombc, StressSA_ancombc)%>%
+                dplyr::rename(id=ASV)
+
+#make df 
+DF7 <- create_unit(data = df_lfc_ancom,
+                       key = "DF7_LFC_MeJA-SA_Heatmap_ancombc",
+                       type = "DATASET_HEATMAP",
+                       tree = tree_16S)
+
+#select colors 
+DF7@specific_themes$heatmap$color$min <- "#2986cc"
+DF7@specific_themes$heatmap$color$max <- "#ff0000"
+DF7@specific_themes$heatmap$color$mid <- "#ebeceb"
+DF7@specific_themes$heatmap$value$mid <- 0
+DF7@specific_themes$heatmap$color$nan <- "#FFFFFF" #if NA, it will be blank
+DF7@specific_themes$heatmap$tree$tree_display <- 0 #no display of tree in heatmap
+
+#final check
+DF7
+
+#save it
+#itol.toolkit::write_unit(DF7, #"./07_consolidate_all_analysis/Results/Annotated_microbial_phylogenetic_tree/16S/")
+
+```
+
+####LFC: Direction 
+
+To know how many species had a negative or positive LFC value on stress with respect to control
+
+MeJA
+```{r}
+
+colnames(df_complete)
+
+#MeJA
+df_lfc_direction <- df_complete %>% 
+                    select(ASV, negative_lfc_MeJA, positive_lfc_MeJA)%>%
+                    dplyr::rename(id=ASV)
+                     
+#make df 
+DF8 <- create_unit(data = df_lfc_direction,
+                       key = "DF8_LFC_MeJA-Direction",
+                       type = "DATASET_MULTIBAR",
+                       tree = tree_16S)
+
+DF8@field$labels <- c("#Sp with negative LFC", "#Sp with positive LFC")
+
+#choose colors
+display.brewer.pal(n=8, name='RdBu') #see palette
+color_heatmap <- brewer.pal(n = 8, name = "RdBu") #get colors
+negative <- color_heatmap[7]
+positive <- color_heatmap[2]
+
+DF8@field$colors <- c(negative, positive)
+
+
+#final check
+DF8
+
+#save it
+#itol.toolkit::write_unit(DF8, #"./07_consolidate_all_analysis/Results/Annotated_microbial_phylogenetic_tree/16S/")
+
+```
+SA
+```{r}
+
+#SA
+df_lfc_direction <- df_complete %>% 
+                    select(ASV, negative_lfc_SA, positive_lfc_SA)%>%
+                    dplyr::rename(id=ASV)
+                     
+#make df 
+DF9 <- create_unit(data = df_lfc_direction,
+                       key = "DF9_LFC_SA-Direction",
+                       type = "DATASET_MULTIBAR",
+                       tree = tree_16S)
+
+DF9@field$labels <- c("#Sp with negative LFC", "#Sp with positive LFC")
+
+#choose colors
+display.brewer.pal(n=8, name='RdBu') #see palette
+color_heatmap <- brewer.pal(n = 8, name = "RdBu") #get colors
+negative <- color_heatmap[7]
+positive <- color_heatmap[2]
+
+DF9@field$colors <- c(negative, positive)
+
+
+#final check
+DF9
+
+#save it
+#itol.toolkit::write_unit(DF9, #"./07_consolidate_all_analysis/Results/Annotated_microbial_phylogenetic_tree/16S/")
+
+```
+
+Now it's finished, and we'll do the same with the fungal tree. For now let's save this environment so we don't have to run it again.
+
+```{r}
+
+save.image(file="./07_consolidate_all_analysis/Results/Annotated_microbial_phylogenetic_tree/16S/16S_R-environment.Rdata")
+
+#clean everything
+rm.all.but(keep=c("lfcres_GoldenASVs_FinalDF_l_replaceNA", "DA_RF_NM_ASVs_intersect", "Spp_abb_name_Kasper"),
+                keep_functions = F)
+```
+
+
+# ITS
+
+## Phyloseq
+
+```{r}
+
+#load Golden ASVs names
+DA_RF_NM_ASVs_intersect
+
+#### ITS ####
+MeJA_asvs <- DA_RF_NM_ASVs_intersect$MeJA_Fun_GoldenASVs #82
+SA_asvs <- DA_RF_NM_ASVs_intersect$SA_Fun_GoldenASVs #97
+
+#Now I need to get the unique names 
+fun_sig_asvs <- c(MeJA_asvs, SA_asvs) #179
+fun_sig_asvs <- unique(fun_sig_asvs) #119 unique ones, there are 60 shared ASVs 
+
+# this will load the 16S and ITS data as a list of two objects
+load("./Data/phyloseq_objects/unnormalized_BacFun_rhizoplane_HighFilt_ps_l.RData")
+unnormalized_BacFun_rhizoplane_HighFilt_ps_l
+
+#Now, I need to remove all those samples that belong to guest species + others not present in the MY tree
+ps_Fun <- subset_samples(unnormalized_BacFun_rhizoplane_HighFilt_ps_l$Fun,
+                       Sp_abb_name %in% Spp_abb_name_Kasper) #only those plant sp present in the tree
+
+#prune ps to keep only those that belong to the Golden ASVs
+ps_golden <- prune_taxa(fun_sig_asvs, ps_Fun)
+
+#check
+ps_golden #ok
+
+#remove big ps object to clear up space
+rm(ps_Fun, unnormalized_BacFun_rhizoplane_HighFilt_ps_l)
+
+```
+
+### Make new phylogenetic tree
+
+Skip and go to line 786 to load it
+```{r}
+
+#get the sequences and save them as FASTA format
+#ps_golden %>%
+#refseq() %>%
+#Biostrings::writeXStringSet("./07_consolidate_all_analysis/Results/Annotated_microbial_phylogenetic_tree/ITS/ITS_goldenASVs_sequences.fasta",
+#             append=FALSE,compress=FALSE,
+#             compression_level=NA, format="fasta")
+
+
+#Go to MAFTT [...]
+```
+
+I followed the same approach as for Bacteria. 
+
+30-08-24: I tried using the web server of MAFFT using `E-INS-i` as option for iterative refinement method,  leaving gapy regions and UPGMA guide tree. However, server was busy and instead used MAFFT as a tool in the EMBL's EBI server (https://www.ebi.ac.uk/jdispatcher/)
+
+Job ID: mafft-I20240830-105421-0053-50505090-p1m
+
+The alignment in fasta format  was used to run the following slurm script to run IQ-tree in the HPC: which means that iqtree will run with a DNA sequence type, 10,000 replicates in bootstrap analysis and that finds the best substitution model automatically.
+
+```{bash}
+
+#!/bin/bash -login
+
+#SBATCH --time=4:00:00
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=4G
+#SBATCH --job-name=16S_tree
+#SBATCH --output=ITS_tree.output
+
+
+cd /lustre/nobackup/INDIVIDUAL/arago004/IQ_tree/ITS ##place where I had the .fasta alignment
+
+iqtree2 -s ITS_goldenASVs_MAFFT_alignment_EBI.fasta -st DNA -m MFP -bb 10000 -nt AUTO ##
+
+```
+
+Once I got the tree (it took less than 5 minutes) I imported back to R
+
+```{r}
+#Import tree
+tree_ITS <- read.tree("./07_consolidate_all_analysis/Results/Annotated_microbial_phylogenetic_tree/ITS/ITS_goldenASVs_MAFFT_alignment_EBI.fasta.treefile")
+
+#check
+tree_ITS
+plot(tree_ITS) #good 
+tree_ITS <- multi2di(tree_ITS) #root it
+
+#save it in .tre format to be imported in iTOL
+#ape::write.tree(tree_ITS, "./07_consolidate_all_analysis/Results/Annotated_microbial_phylogenetic_tree/ITS/ITS_tree.tre")
+
+#change tree in ps object 
+ps_golden@phy_tree <- tree_ITS
+
+```
+
+## Taxonomy dataframe
+
+```{r}
+#make a new df with two columns; one for MeJA and another one for SA
+df_fun_sig_asvs <- as.data.frame(fun_sig_asvs) 
+colnames(df_fun_sig_asvs) <- "asv"                   
+df_fun_sig_asvs <- df_fun_sig_asvs %>%
+                   mutate(MeJA=case_when(asv %in% MeJA_asvs ~ "1",
+                                         TRUE ~ "-1"))%>% #0 is for empty shape, -1 is no shape
+                   mutate(SA=case_when(asv %in% SA_asvs ~ "1",
+                                         TRUE ~ "-1"))
+
+#let's get the taxonomy
+#clean it first
+tax_table(ps_golden)[, colnames(tax_table(ps_golden))] <- gsub(tax_table(ps_golden)[, colnames(tax_table(ps_golden))], pattern = "[a-z]__", replacement = "")
+
+#put it in a df 
+df_taxonomy <- as.data.frame(ps_golden@tax_table)
+order_asvs <- rownames(df_taxonomy) #get order of rows to keep using it for rest of df's
+
+#re-order sig_asvs df 
+df_fun_sig_asvs <- df_fun_sig_asvs %>%
+                   column_to_rownames(var="asv") #first make new rownames
+#now order it 
+df_fun_sig_asvs <- df_fun_sig_asvs[order(match(rownames(df_fun_sig_asvs),
+                                   order_asvs)), , drop=FALSE] 
+
+#now you can merge df's
+df_complete <- cbind(df_fun_sig_asvs, df_taxonomy)
+df_complete <- df_complete %>% select(-Confidence) #remove non-informative columns 
+
+```
+
+## L2FC per Sp from Melissa [Not used for iTOL]
+
+```{r}
+
+#load df with log2-fold change
+load("./07_consolidate_all_analysis/r_objects/MU_HeatmapsGoldenASVs/lfcres_GoldenASVs_FinalDF_l_replaceNA.RData")
+
+#first, only MeJA
+lfc_MeJA <- lfcres_GoldenASVs_FinalDF_l_replaceNA$lfcres_df_MeJA_Fun
+
+#add MeJA suffix
+lfc_MeJA <- lfc_MeJA %>% 
+            mutate(across(everything(), ~ na_if(., 0.00)))%>% #first, change 0.0 to NA's
+            rename_with(~ paste0(., "_MeJA"))
+
+#let's make a column with the amount of times an ASV was significant
+#(if 0.0 I asume it was NA and therefore not significant)
+lfc_average <- lfc_MeJA %>% 
+             mutate(LFC_average_MeJA = rowMeans(., na.rm=T))%>%  #get average
+             select(LFC_average_MeJA)
+
+lfc_ocurrences <- lfc_MeJA %>% 
+             mutate(num_sp_sig_MeJA= rowSums(!is.na(.)))%>%
+             mutate(num_sp_NA_MeJA=rowSums(is.na(.)))%>% 
+             mutate(negative_lfc_MeJA=rowSums(lfc_MeJA < 0, na.rm=T))%>% 
+             mutate(positive_lfc_MeJA=num_sp_sig_MeJA-negative_lfc_MeJA) 
+
+#add the average value
+lfc_average$ASV <- rownames(lfc_average)
+lfc_ocurrences$ASV <- rownames(lfc_ocurrences)
+lfc_MeJA <- left_join(lfc_ocurrences, lfc_average) 
+lfc_MeJA <- lfc_MeJA %>% relocate(ASV)
+
+#then, SA
+lfc_SA <- lfcres_GoldenASVs_FinalDF_l_replaceNA$lfcres_df_SA_Fun
+
+#add SA suffix
+lfc_SA <- lfc_SA %>% 
+            mutate(across(everything(), ~ na_if(., 0.00)))%>% #first, change 0.0 to NA's
+            rename_with(~ paste0(., "_SA"))
+
+#let's make a column with the amount of times an ASV was significant
+#(if 0.0 I asume it was NA and therefore not significant)
+lfc_average <- lfc_SA %>% 
+             mutate(LFC_average_SA = rowMeans(., na.rm=T))%>%  #get average
+             select(LFC_average_SA)
+
+lfc_ocurrences <- lfc_SA %>% 
+             mutate(num_sp_sig_SA= rowSums(!is.na(.)))%>%
+             mutate(num_sp_NA_SA=rowSums(is.na(.)))%>% 
+             mutate(negative_lfc_SA=rowSums(lfc_SA < 0, na.rm=T))%>% 
+             mutate(positive_lfc_SA=num_sp_sig_SA-negative_lfc_SA) 
+
+#add the average value
+lfc_average$ASV <- rownames(lfc_average)
+lfc_ocurrences$ASV <- rownames(lfc_ocurrences)
+lfc_SA <- left_join(lfc_ocurrences, lfc_average) 
+lfc_SA <- lfc_SA %>% relocate(ASV)
+
+#Now, let's join the df's
+lfc <- full_join(lfc_MeJA, lfc_SA, by="ASV")
+
+#Let's make a new df first with MeJA information
+df_complete2 <- df_complete #our dataframe with metadata
+
+#add column named ASV
+df_complete2$ASV <- rownames(df_complete2) #make new column 'ASV'
+
+#join df 
+df_complete2 <- full_join(df_complete2, lfc, by="ASV")
+
+#order
+df_complete2 <- df_complete2 %>% 
+                dplyr::relocate(ASV, MeJA, SA)
+
+rownames(df_complete2) <- df_complete2$ASV
+```
+
+
+## LFC from Ancombc [Used for iTOL]
+
+Let's try to use Ancom just to calculate the log-fold change per ASVs between Control and Stress-treatments. This will be an average value accross species (I think this was the way Pedro plotted the heattrees but needs confirmation)
+
+```{r}
+
+#This code comes from the psf_microbiome project
+
+ps_golden #this is my ps object with golden asvs for Bac
+
+library(ANCOMBC)
+
+#Just for Bac-GoldenASVs but using 3 groups
+set.seed(123)
+ancom <- ANCOMBC::ancombc(phyloseq = ps_golden, 
+                      formula = "Stress", 
+                      p_adj_method = "fdr", #same as "BH" Benjamini & Hochberg
+                      lib_cut = 0,
+                      prv_cut=0,
+                      group = "Stress", 
+                      struc_zero = TRUE, #with structural zero's
+                      neg_lb = FALSE, #classifies structural zero's if it's zero and not its asymptotic lower bound 
+                      tol = 1e-5,               
+                      max_iter = 100, 
+                      conserve = TRUE, 
+                      alpha = 0.05,
+                      global=TRUE)
+
+head(ancom$res$lfc) #LFC
+
+#Get LFC values
+
+lfc_ancom <- ancom$res$lfc #log-fold change according to control 
+
+#### Now I have a single value of LFC per each golden ASV for both MeJA and SA vs Control in the lfc object ####
+lfc_ancom <- lfc_ancom %>% 
+             mutate(ASV=taxon)%>% 
+             select(c(ASV, StressMeJA, StressSA))%>%
+             rename_with(~ paste0(., "_ancombc"))
+colnames(lfc_ancom)[1] <- "ASV"
+
+#finally, join it with full df 
+df_complete3 <- left_join(df_complete2, lfc_ancom)
+head(df_complete3)
+
+rownames(df_complete3) <- df_complete3$ASV
+
+#save df
+save(df_complete3, file="./07_consolidate_all_analysis/Results/Annotated_microbial_phylogenetic_tree/ITS/df_complete.Rdata")
+
+```
+
+
+## iTOL
+
+
+### Metadata in iTOL format
+
+First, arrange data and colors to be used 
+```{r}
+
+#First gather what you need 
+df_complete #our dataframe with metadata
+tree_ITS #our tree
+
+#Set-up colors
+
+#### colors for Treatment ####
+color_MeJA <- "#E69F00"
+color_SA <- "#009E73"
+
+```
+
+
+#### Treatment
+
+MeJA
+```{r}
+
+Treatment_MeJA <- df_complete3 %>%
+                  dplyr::select(ASV,MeJA)%>%
+                  mutate(id=ASV)%>% #make new column named "ID" for iTOL
+                  relocate(id)%>% #put it first
+                  select(-ASV) #remove repeated column
+  
+DF1 <- itol.toolkit::create_unit(data = Treatment_MeJA, 
+                         key = "DF1_Treatment-MeJA", 
+                         type = "DATASET_BINARY", #type of dataset
+                         tree = tree_ITS)
+
+DF1@field$colors <- color_MeJA #change colors
+DF1@field$shapes #circle is 2, so ok
+
+#save it
+#itol.toolkit::write_unit(DF1, "./07_consolidate_all_analysis/Results/Annotated_microbial_phylogenetic_tree/ITS/")
+
+```
+
+SA
+```{r}
+Treatment_SA <- df_complete3 %>%
+                  dplyr::select(ASV,SA)%>%
+                  mutate(id=ASV)%>% #make new column named "ID" for iTOL
+                  relocate(id)%>% #put it first
+                  select(-ASV) #remove repeated column
+  
+DF2 <- itol.toolkit::create_unit(data = Treatment_SA, 
+                         key = "DF2_Treatment-SA", 
+                         type = "DATASET_BINARY", #type of dataset
+                         tree = tree_ITS)
+
+DF2@field$colors <- color_SA #change colors
+DF2@field$shapes #check
+
+#save it
+#itol.toolkit::write_unit(DF2, "./07_consolidate_all_analysis/Results/Annotated_microbial_phylogenetic_tree/ITS/")
+
+```
+
+#### Genus
+
+```{r}
+
+df_Genus <- df_complete3 %>%
+             dplyr::select(Genus, ASV)%>%
+             dplyr::rename(id=ASV)%>% #make new column named "ID" for iTOL
+             relocate(id) #put it first
+
+#replace Genus names with names of ASV and add number to Genus so its clear that it's different ASVs (Marcel's suggestion)
+#it also replaces NA's by the name of the ASV
+df_Genus <- df_Genus %>% mutate(number=str_split_i(df_Genus$id, "_", 2))%>% #get number of ASV
+                                mutate(Genus=paste(.$Genus, .$number, sep= "-"))%>% #make new with number and genus
+                                mutate(Genus=gsub("NA", "fASV", .$Genus))%>%
+                                dplyr::select(-number) #ok
+
+#make df 
+DF3 <- create_unit(data = df_Genus,
+                       key = "DF3_label_Genus",
+                       type = "LABELS",
+                       tree = tree_ITS)
+
+#itol.toolkit::write_unit(DF3, "./07_consolidate_all_analysis/Results/Annotated_microbial_phylogenetic_tree/ITS/")
+
+```
+
+
+#### Phylum
+How to extend color palettes: #https://www.datanovia.com/en/blog/easy-way-to-expand-color-palettes-in-r/
+```{r}
+
+df_Phylum <- df_complete3 %>%
+             dplyr::select(Phylum, ASV)%>%
+             dplyr::rename(id=ASV)%>% #make new column named "ID" for iTOL
+             relocate(id) #put it first
+          
+df_Phylum[is.na(df_Phylum)] <- "Not_assigned" #doesn't work if there's an NA
+        
+#add color to Phylum
+Phylum <- unique(df_Phylum$Phylum) 
+colorCount <- 7
+color_phylum <- colorRampPalette(brewer.pal(colorCount, name = 'Pastel2'))(colorCount) #gives you a palette
+color_phylum #copy-paste output so the colors can be seen
+color_phylum <- c("#BEBADA","#000001","#B3E2CD", "#FDCDAC", "#CBD5E8", "#F4CAE4", "#FFF2AE")
+
+#make it a df
+df_Phylum_color <- data.frame(Phylum, color_phylum)
+
+#merge with df_Phylum
+df_Phylum <- df_Phylum%>%
+             dplyr::inner_join(df_Phylum_color)
+
+#option with circles at the end
+DF4 <- itol.toolkit::create_unit(data = df_Phylum, 
+                      key = "DF4_Phylum_colors", 
+                      type = "DATASET_SYMBOL",
+                      position=1,
+                      tree = tree_ITS,
+                      fill=1)
+
+DF4@specific_themes$basic_plot$size_max <- 4
+
+#change it for legend
+DF4@common_themes$legend$shapes <- c("2", "2", "2", "2","2", "2", "2")
+DF4@common_themes$legend$shape_scales <- c(1,1,1,1,1,1,1)
+DF4@common_themes$legend$horizontal <- "1"
+
+#save it
+#itol.toolkit::write_unit(DF4, "./07_consolidate_all_analysis/Results/Annotated_microbial_phylogenetic_tree/ITS/")
+
+```
+
+#### Class
+
+```{r}
+
+df_Class<- df_complete3 %>%
+             dplyr::select(Class, ASV, Phylum)%>%
+             dplyr::rename(id=ASV)%>% #make new column named "ID" for iTOL
+             relocate(id) #put it first
+          
+df_Class[is.na(df_Class)] <- "Not_assigned" #doesn't work if there's an NA
+        
+#merge with df_Phylum
+df_Class2 <- df_Class%>%
+             dplyr::inner_join(df_Phylum_color)%>%
+             dplyr::rename(color_class=color_phylum)
+
+#get unique combinations
+df_Class3 <- df_Class2 %>% distinct(Phylum, Class, color_class)%>% arrange(Phylum, Class)
+
+#Now, replace colors in those that have more than one class per Phylum
+#the colors I got them from chat gpt by asking:
+# "give me a set of X colors similar to to #examplecolor"
+
+"#BEBADA"
+Ascomycota <-  c("#AFA2C8","#D0C1E1", "#C6A7D3", "#B3A4CB", "#D4B8E4", "#A89FC0")
+"#F4CAE4"
+Basidiomycota <- c("#F6A8B8","#F2B7D4")
+"#FFF2AE"
+Chytridiomycota <- c("#F7E6A0","#FDF7B6", "#FDF0A0")
+
+#replace values 
+df_Class4 <- df_Class3 %>% mutate(color_class = case_when(
+  Class == "Dothideomycetes" ~ Ascomycota[1],
+  Class == "Eurotiomycetes" ~ Ascomycota[2],
+  Class == "Leotiomycetes" ~ Ascomycota[3],
+  Phylum == "Ascomycota" & Class == "Not_assigned" ~ Ascomycota[4],
+  Class == "Pezizomycotina_cls_Incertae_sedis" ~ Ascomycota[5],
+  Class == "Sordariomycetes" ~ Ascomycota[6],
+  Class == "Agaricomycetes" ~ Basidiomycota[1],
+  Class == "Tremellomycetes" ~ Basidiomycota[2],
+  Class == "Chytridiomycetes" ~ Chytridiomycota[1],
+  Class == "Rhizophlyctidomycetes" ~ Chytridiomycota[2],
+  Class == "unidentified" ~ Chytridiomycota[3],
+  TRUE ~ color_class
+)) 
+
+#Now, make it a single df 
+df_Class5 <- df_Class %>% 
+             inner_join(df_Class4)%>%
+             select(-Phylum)
+
+DF5 <- itol.toolkit::create_unit(data = df_Class5, 
+                      key = "DF5_Class_colors", 
+                      type = "TREE_COLORS", 
+                      subtype = "range",
+                      tree = tree_ITS)
+
+#save it
+#itol.toolkit::write_unit(DF5, "./07_consolidate_all_analysis/Results/Annotated_microbial_phylogenetic_tree/ITS/")
+
+```
+
+####LFC-1: Values from Meli
+
+```{r}
+
+#For this, first you'll take the summary values of the L2FC value per ASV per stress and this will be
+#the input for iTOL (same as Pedro did)
+
+df_lfc <- df_complete3 %>% 
+          select(ASV,LFC_average_MeJA, LFC_average_SA)%>%
+          dplyr::rename(id=ASV)
+
+#make df 
+DF6 <- create_unit(data = df_lfc,
+                       key = "DF6_LFC_MeJA-SA_Heatmap",
+                       type = "DATASET_HEATMAP",
+                       tree = tree_ITS)
+
+DF6@data$tip[DF6@data$tip == 0] <- NA #replace 0's for NAs
+
+#select colors 
+DF6@specific_themes$heatmap$color$min <- "#2986cc"
+DF6@specific_themes$heatmap$color$max <- "#ff0000"
+DF6@specific_themes$heatmap$color$mid <- "#ebeceb"
+DF6@specific_themes$heatmap$value$mid <- 0
+DF6@specific_themes$heatmap$color$nan <- "#FFFFFF" #if NA, it will be blank
+
+DF6@specific_themes$heatmap$tree$tree_display <- 0 #no display of tree in heatmap
+
+#final check
+DF6
+
+#save it
+#itol.toolkit::write_unit(DF6, "./07_consolidate_all_analysis/Results/Annotated_microbial_phylogenetic_tree/ITS/")
+
+```
+
+####LFC-2: Values from ANCOMBC [Used]
+
+The difference is that it calculates the overall LFC of stress vs control per ASV, without taking species into account (in order to have an average value)
+
+```{r}
+
+#For this, first you'll take the summary values of the L2FC value per ASV per stress and this will be
+#the input for iTOL (same as Pedro did)
+
+colnames(df_complete3)
+
+df_lfc_ancom <- df_complete3 %>% 
+                select(ASV,StressMeJA_ancombc, StressSA_ancombc)%>%
+                dplyr::rename(id=ASV)
+
+#make df 
+DF7 <- create_unit(data = df_lfc_ancom,
+                       key = "DF7_LFC_MeJA-SA_Heatmap_ancombc",
+                       type = "DATASET_HEATMAP",
+                       tree = tree_ITS)
+
+#select colors 
+DF7@specific_themes$heatmap$color$min <- "#2986cc"
+DF7@specific_themes$heatmap$color$max <- "#ff0000"
+DF7@specific_themes$heatmap$color$mid <- "#FFFFFF"
+DF7@specific_themes$heatmap$value$mid <- 0
+#DF7@specific_themes$heatmap$color$nan <- "#FFFFFF" #if NA, it will be blank
+
+DF7@specific_themes$heatmap$tree$tree_display <- 0 #no display of tree in heatmap
+
+#final check
+DF7
+
+#save it
+#itol.toolkit::write_unit(DF7, "./07_consolidate_all_analysis/Results/Annotated_microbial_phylogenetic_tree/ITS/")
+
+```
+
+####LFC: Direction 
+MeJA
+```{r}
+
+colnames(df_complete3)
+
+#MeJA
+df_lfc_direction <- df_complete3 %>% 
+                    select(ASV, negative_lfc_MeJA, positive_lfc_MeJA)%>%
+                    dplyr::rename(id=ASV)
+                     
+#make df 
+DF8 <- create_unit(data = df_lfc_direction,
+                       key = "DF8_LFC_MeJA-Direction",
+                       type = "DATASET_MULTIBAR",
+                       tree = tree_ITS)
+
+DF8@field$labels <- c("#Sp with negative LFC", "#Sp with positive LFC")
+
+#choose colors
+display.brewer.pal(n=8, name='RdBu') #see palette
+color_heatmap <- brewer.pal(n = 8, name = "RdBu") #get colors
+negative <- color_heatmap[7]
+positive <- color_heatmap[2]
+
+DF8@field$colors <- c(negative, positive)
+
+
+#final check
+DF8
+
+#save it
+#itol.toolkit::write_unit(DF8, "./07_consolidate_all_analysis/Results/Annotated_microbial_phylogenetic_tree/ITS/")
+
+```
+SA
+```{r}
+
+#SA
+df_lfc_direction <- df_complete3 %>% 
+                    select(ASV, negative_lfc_SA, positive_lfc_SA)%>%
+                    dplyr::rename(id=ASV)
+                     
+#make df 
+DF9 <- create_unit(data = df_lfc_direction,
+                       key = "DF9_LFC_SA-Direction",
+                       type = "DATASET_MULTIBAR",
+                       tree = tree_ITS)
+
+DF9@field$labels <- c("#Sp with negative LFC", "#Sp with positive LFC")
+
+#choose colors
+display.brewer.pal(n=8, name='RdBu') #see palette
+color_heatmap <- brewer.pal(n = 8, name = "RdBu") #get colors
+negative <- color_heatmap[7]
+positive <- color_heatmap[2]
+
+DF9@field$colors <- c(negative, positive)
+
+
+#final check
+DF9
+
+#save it
+#itol.toolkit::write_unit(DF9, "./07_consolidate_all_analysis/Results/Annotated_microbial_phylogenetic_tree/ITS/")
+
+```
+
+Now it's finished, and we'll do the same with the fungal tree. For now let's save this environment so we don't have to run it again.
+
+```{r}
+
+#save.image(file="./07_consolidate_all_analysis/Results/Annotated_microbial_phylogenetic_tree/ITS/ITS_R-environment.Rdata")
+
+#ready!
+```
+
+

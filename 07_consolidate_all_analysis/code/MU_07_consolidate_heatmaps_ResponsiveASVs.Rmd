@@ -1,0 +1,365 @@
+---
+title: "MU_07_consolidate_HeatmapsGoldenASVs"
+author: "Melissa"
+date: "2023-04-25"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+## 5_1.0 load libraries, improve memory use
+```{r results="hide"}
+# this will load all key libraries for the whole project
+source("./renv/0_load_libraries.R")
+library("ggplotify")
+library("data.table")
+
+```
+
+#Heatmaps for all plants at once: 
+
+##create metadata and taxonomy in the same format as the results from the responsive ASVs (MeJA_Bac, SA_Bac, MeJA_Fun and SA_Fun)
+```{r}
+#Taxonomy for this heatmap
+load("./Data/phyloseq_objects/CSS_BacFun_rhizoplane_HighFilt_ps_l.RData")
+
+#From Pedro's commit 7a36200
+# split the original object by species
+ps_sp_l<-lapply(CSS_BacFun_rhizoplane_HighFilt_ps_l, function (x) 
+  phyloseq_sep_variable(x,variable = c("Sp_abb_name")))
+
+# filter  the original object to keep only brassicacea present in the MY tree
+ps_brassicaceae_BacFun_l<-lapply(CSS_BacFun_rhizoplane_HighFilt_ps_l, function (x) 
+  subset_samples(x, MY_tree_presence =="inside_MY_tree"))
+
+ps_for_fisher_4_l<-list(ps_MeJA_Bac = subset_samples(ps_brassicaceae_BacFun_l$Bac, Stress %in% c("MeJA", "Control")),
+                        ps_SA_Bac = subset_samples(ps_brassicaceae_BacFun_l$Bac, Stress %in% c("SA", "Control")),
+                        ps_MeJA_Fun = subset_samples(ps_brassicaceae_BacFun_l$Fun, Stress %in% c("MeJA", "Control")),
+                        ps_SA_Fun =  subset_samples(ps_brassicaceae_BacFun_l$Fun, Stress %in% c("SA", "Control")))
+
+taxonomy_4_l <- lapply(ps_for_fisher_4_l, function(x) data.frame(x@tax_table[,c("Phylum"), drop=FALSE]))
+
+#Metadata
+Metadata_4_l <- lapply(ps_for_fisher_4_l, function(x) data.frame(x@sam_data[,c("Sp_abb_name", "Speed", "Sp_Tribe", "Sp_Lineage_Walden" ), drop=TRUE]))
+#Get rid of rownames
+Metadata_4_l_norownames <- lapply(Metadata_4_l,function(x) {rownames(x) <- NULL; x})
+#Delete rows that are duplicated by Sp_abb_name
+annotationMetadata_4_l_agg <- lapply(Metadata_4_l_norownames, function(x) x[!duplicated(x$Sp_abb_name),])
+#Make Sp_abb_name the rownames
+annotationMetadata_4_l_agg_rownames <- lapply(annotationMetadata_4_l_agg, function(x) data.frame(x[,-1], row.names=x[,1]))
+
+```
+
+###Save all these objects
+```{r}
+save(ps_for_fisher_4_l, 
+     file = "./07_consolidate_all_analysis/r_objects/MU_HeatmapsGoldenASVs/ps_for_fisher_4_l.RData")
+
+save(taxonomy_4_l, 
+     file = "./07_consolidate_all_analysis/r_objects/MU_HeatmapsGoldenASVs/taxonomy_4_l.RData")
+
+save(annotationMetadata_4_l_agg_rownames, 
+     file = "./07_consolidate_all_analysis/r_objects/MU_HeatmapsGoldenASVs/annotationMetadata_4_l_agg_rownames.RData")
+
+```
+
+##Create df of log2foldChanges per plant
+```{r}
+#Load log2fold changes table and list of asvs detected per plant by all three methodologies
+load("./07_consolidate_all_analysis/Results/DA_RF_NM_ASVs_intersect.RData")
+
+#Organize the log2fold changes in the same type of list
+load("./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/lfcres_stddds2_Wald_MeJA_Bac.RData")
+load("./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/lfcres_stddds2_Wald_SA_Bac.RData")
+load("./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/lfcres_stddds2_Wald_MeJA_Fun.RData")
+load("./05_Differential_abundance/Objects/5.1deseqandZINBdeseq/lfcres_stddds2_Wald_SA_Fun.RData")
+
+log2fold_changes_list <- list(l2f_MeJA_Bac = lfcres_stddds2_Wald_MeJA_Bac, l2f_SA_Bac = lfcres_stddds2_Wald_SA_Bac, l2f_MeJA_Fun = lfcres_stddds2_Wald_MeJA_Fun, l2f_SA_Fun = lfcres_stddds2_Wald_SA_Fun)
+
+#Subset to the 22 brassicas
+phylo_tips <- c("At", "Al", "Cas", "Tg", "Ec", "Mm", "Bv",
+              "Lr", "Ds", "Bi", "Bn", "Sar", "Hi", "Br", "Bo_M",
+              "Dt", "Si", "It", "Co", "Lm", "Ia", "Es")
+
+log2fold_changes_list_22sp <- lapply(log2fold_changes_list, function(x) x[names(x) %in%  phylo_tips])
+
+
+#MeJA_Bac
+#Subset to only responsive ASVs
+lfcres_Golden_ASVs_MeJA_BAc <- lapply(log2fold_changes_list_22sp$l2f_MeJA_Bac, function(x) as.data.frame(x[which(rownames(x) %in% DA_RF_NM_ASVs_intersect$MeJA_Bac_GoldenASVs), c("log2FoldChange"), drop = FALSE]))
+
+#Name columns by the name of the object in the list
+lfcres_Golden_ASVs_MeJA_BAc_named <- Map(function(x,y) setNames(x,y), lfcres_Golden_ASVs_MeJA_BAc, names(lfcres_Golden_ASVs_MeJA_BAc))
+#convert to data.table to have the rownames as an own column and not as rownames anymore
+lfcres_Golden_ASVs_MeJA_BAc_named2 <- lapply(lfcres_Golden_ASVs_MeJA_BAc_named, function(x)
+  setDT(x, keep.rownames = TRUE)[])
+#Convert back to a df this time with the ASV_id as an individual column
+lfcres_Golden_ASVs_MeJA_BAc_named2_df <- lapply(lfcres_Golden_ASVs_MeJA_BAc_named2, function(x)
+  (as.data.frame(x)))
+#Now merge the dfs in the list by the ASV_ID that is an individual column now
+lfcres_Golden_ASVs_MeJA_BAc_reduce <- Reduce(function(x, y) merge(x, y, by="rn", all=TRUE), lfcres_Golden_ASVs_MeJA_BAc_named2_df)
+#Return the ASVIDs to rownames
+lfcres_Golden_ASVs_MeJA_BAc_FinalDf_rownames <- data.frame(lfcres_Golden_ASVs_MeJA_BAc_reduce[,-1], row.names=lfcres_Golden_ASVs_MeJA_BAc_reduce[,1])
+
+
+#SA_Bac
+#Subset to those ASVs
+lfcres_Golden_ASVs_SA_Bac <- lapply(log2fold_changes_list_22sp$l2f_SA_Bac, function(x) as.data.frame(x[which(rownames(x) %in% DA_RF_NM_ASVs_intersect$SA_Bac_GoldenASVs), c("log2FoldChange"), drop = FALSE]))
+
+#Name columns by the name of the object in the list
+lfcres_Golden_ASVs_SA_Bac_named <- Map(function(x,y) setNames(x,y), lfcres_Golden_ASVs_SA_Bac, names(lfcres_Golden_ASVs_SA_Bac))
+#convert to data.table to have the rownames as an own column and not as rownames anymore
+lfcres_Golden_ASVs_SA_Bac_named2 <- lapply(lfcres_Golden_ASVs_SA_Bac_named, function(x)
+  setDT(x, keep.rownames = TRUE)[])
+#Convert back to a df this time with the ASV_id as an individual column
+lfcres_Golden_ASVs_SA_Bac_named2_df <- lapply(lfcres_Golden_ASVs_SA_Bac_named2, function(x)
+  (as.data.frame(x)))
+#Now merge the dfs in the list by the ASV_ID that is an individual column now
+lfcres_Golden_ASVs_SA_Bac_reduce <- Reduce(function(x, y) merge(x, y, by="rn", all=TRUE), lfcres_Golden_ASVs_SA_Bac_named2_df)
+#Return the ASVIDs to rownames
+lfcres_Golden_ASVs_SA_Bac_FinalDf_rownames <- data.frame(lfcres_Golden_ASVs_SA_Bac_reduce[,-1], row.names=lfcres_Golden_ASVs_SA_Bac_reduce[,1])
+
+
+
+#MeJA_Fun
+#Subset to those ASVs
+lfcres_Golden_ASVs_MeJA_Fun <- lapply(log2fold_changes_list_22sp$l2f_MeJA_Fun, function(x) as.data.frame(x[which(rownames(x) %in% DA_RF_NM_ASVs_intersect$MeJA_Fun_GoldenASVs), c("log2FoldChange"), drop = FALSE]))
+
+#Name columns by the name of the object in the list
+lfcres_Golden_ASVs_MeJA_Fun_named <- Map(function(x,y) setNames(x,y), lfcres_Golden_ASVs_MeJA_Fun, names(lfcres_Golden_ASVs_MeJA_Fun))
+#convert to data.table to have the rownames as an own column and not as rownames anymore
+lfcres_Golden_ASVs_MeJA_Fun_named2 <- lapply(lfcres_Golden_ASVs_MeJA_Fun_named, function(x)
+  setDT(x, keep.rownames = TRUE)[])
+#Convert back to a df this time with the ASV_id as an individual column
+lfcres_Golden_ASVs_MeJA_Fun_named2_df <- lapply(lfcres_Golden_ASVs_MeJA_Fun_named2, function(x)
+  (as.data.frame(x)))
+#Now merge the dfs in the list by the ASV_ID that is an individual column now
+lfcres_Golden_ASVs_MeJA_Fun_reduce <- Reduce(function(x, y) merge(x, y, by="rn", all=TRUE), lfcres_Golden_ASVs_MeJA_Fun_named2_df)
+#Return the ASVIDs to rownames
+lfcres_Golden_ASVs_MeJA_Fun_FinalDf_rownames <- data.frame(lfcres_Golden_ASVs_MeJA_Fun_reduce[,-1], row.names=lfcres_Golden_ASVs_MeJA_Fun_reduce[,1])
+
+
+#SA_Fun
+#Subset to those ASVs
+lfcres_Golden_ASVs_SA_Fun <- lapply(log2fold_changes_list_22sp$l2f_SA_Fun, function(x) as.data.frame(x[which(rownames(x) %in% DA_RF_NM_ASVs_intersect$SA_Fun_GoldenASVs), c("log2FoldChange"), drop = FALSE]))
+
+#Name columns by the name of the object in the list
+lfcres_Golden_ASVs_SA_Fun_named <- Map(function(x,y) setNames(x,y), lfcres_Golden_ASVs_SA_Fun, names(lfcres_Golden_ASVs_SA_Fun))
+#convert to data.table to have the rownames as an own column and not as rownames anymore
+lfcres_Golden_ASVs_SA_Fun_named2 <- lapply(lfcres_Golden_ASVs_SA_Fun_named, function(x)
+  setDT(x, keep.rownames = TRUE)[])
+#Convert back to a df this time with the ASV_id as an individual column
+lfcres_Golden_ASVs_SA_Fun_named2_df <- lapply(lfcres_Golden_ASVs_SA_Fun_named2, function(x)
+  (as.data.frame(x)))
+#Now merge the dfs in the list by the ASV_ID that is an individual column now
+lfcres_Golden_ASVs_SA_Fun_reduce <- Reduce(function(x, y) merge(x, y, by="rn", all=TRUE), lfcres_Golden_ASVs_SA_Fun_named2_df)
+#Return the ASVIDs to rownames
+lfcres_Golden_ASVs_SA_Fun_FinalDf_rownames <- data.frame(lfcres_Golden_ASVs_SA_Fun_reduce[,-1], row.names=lfcres_Golden_ASVs_SA_Fun_reduce[,1])
+
+
+
+#List the dfs
+lfcres_GoldenASVs_FinalDF_l <- list(lfcres_df_MeJA_Bac = lfcres_Golden_ASVs_MeJA_BAc_FinalDf_rownames,
+                                    lfcres_df_SA_Bac = lfcres_Golden_ASVs_SA_Bac_FinalDf_rownames, 
+                                    lfcres_df_MeJA_Fun = lfcres_Golden_ASVs_MeJA_Fun_FinalDf_rownames,
+                                    lfcres_df_SA_Fun = lfcres_Golden_ASVs_SA_Fun_FinalDf_rownames)
+
+#Replace NA for 0
+lfcres_GoldenASVs_FinalDF_l_replaceNA <- lapply(lfcres_GoldenASVs_FinalDF_l, function(x) replace(x, is.na(x), 0)) 
+#Check the output
+lfcres_GoldenASVs_FinalDF_l_replaceNA$lfcres_df_MeJA_Fun
+
+```
+
+###Save these df objects
+```{r}
+#Log2fold changes df for the 22 Brassicas ALL ASVs
+save(log2fold_changes_list_22sp, 
+     file = "./07_consolidate_all_analysis/r_objects/MU_HeatmapsGoldenASVs/log2fold_changes_list_22sp.RData")
+
+#Subsetted to only responsive ASVs
+save(lfcres_GoldenASVs_FinalDF_l, 
+     file = "./07_consolidate_all_analysis/r_objects/MU_HeatmapsGoldenASVs/lfcres_GoldenASVs_FinalDF_l.RData")
+
+#Subsetted to only responsive ASVs and replacing NA for 0 (absent)
+save(lfcres_GoldenASVs_FinalDF_l_replaceNA, 
+     file = "./07_consolidate_all_analysis/r_objects/MU_HeatmapsGoldenASVs/lfcres_GoldenASVs_FinalDF_l_replaceNA.RData")
+```
+
+##Load saved objects if necessary
+```{r}
+#load("./07_consolidate_all_analysis/r_objects/MU_HeatmapsGoldenASVs/taxonomy_4_l.RData")
+#load("./07_consolidate_all_analysis/r_objects/MU_HeatmapsGoldenASVs/annotationMetadata_4_l_agg_rownames.RData")
+#load("./07_consolidate_all_analysis/r_objects/MU_HeatmapsGoldenASVs/lfcres_GoldenASVs_FinalDF_l_replaceNA.RData")
+```
+
+##Re organize the columns to match Figure 1 from Manuscript v6
+```{r}
+head(lfcres_GoldenASVs_FinalDF_l_replaceNA$lfcres_df_MeJA_Bac)
+
+lfcres_GoldenASVs_FinalDF_l_replaceNA_reordered <- lapply(lfcres_GoldenASVs_FinalDF_l_replaceNA, function(x) x[, c("Al", "At", "Cas", "Tg", "Ec", "Mm", "Ds", "Lr", "Bv", "Bi", "Es", "Br", "Bo_M", "Hi", "Sar", "Dt", "Bn", "It", "Si", "Co", "Lm", "Ia")])
+```
+
+##Make heatmaps
+```{r}
+#Homogenize the colors of the bacterial and fungal phyla
+Bacterial_phyla = list(
+    Phylum = c(p__Acidobacteriota = "#4DAF4A", 
+               p__Actinobacteriota = "#00008B", 
+               p__Armatimonadota = "#7570B3", 
+               p__Bacteroidota = "#CCCCCC", 
+               p__Chloroflexi = "#FFD700", 
+               p__Fibrobacterota = "#FFFF99",
+               p__Firmicutes = "#9932cc",
+               p__Gemmatimonadota = "#B3CDE3",
+               p__Myxococcota = "#FFFF99",
+               p__Patescibacteria = "#A6CEE3",
+               p__Planctomycetota = "#7FC97F",
+               p__Proteobacteria = "#1F78B4",
+               p__Verrucomicrobiota = "#66A61E",
+               p__Bdellovibrionota = "#FDDAEC"))
+
+
+#MeJA_Bac
+min_value_MeJA <- min(lfcres_GoldenASVs_FinalDF_l_replaceNA_reordered$lfcres_df_MeJA_Bac)
+max_value_MeJA <- max(lfcres_GoldenASVs_FinalDF_l_replaceNA_reordered$lfcres_df_MeJA_Bac)
+breaks_MeJA <- unique(c(
+  seq(min_value_MeJA, -1, length.out = 10), 
+  seq(-1, 1, length.out = 30), # More breaks in this range for sensitivity
+  seq(1, max_value_MeJA, length.out = 10)
+))
+
+MeJA_Bac_GoldenASVs_August2025 <- pheatmap(lfcres_GoldenASVs_FinalDF_l_replaceNA_reordered$lfcres_df_MeJA_Bac, 
+                           color = colorRampPalette(c("darkblue", "blue", "white", "red", "darkred"))(length(breaks_MeJA) - 1), 
+                           breaks = breaks_MeJA,
+                           cluster_rows = T,
+                           cluster_cols = F, 
+                           show_rownames = F, 
+                           show_colnames = T,
+                           annotation_row = taxonomy_4_l$ps_MeJA_Bac,
+                           annotation_legend = F,
+                           annotation_colors = Bacterial_phyla,
+                           scale = "none",
+                           #annotation_col = y,
+                           #main = "Log2Fold Changes_GoldenASVs", 
+                           silent = T,
+                           na_col = "black",
+                           gaps_col = c(9,10,11,19,20),
+                           fontsize = 20)
+
+#SA_Bac
+#set the scale of the colors to avoid skewed heatmap
+min_value_SA_Bac <- min(lfcres_GoldenASVs_FinalDF_l_replaceNA_reordered$lfcres_df_SA_Bac)
+max_value_SA_Bac <- max(lfcres_GoldenASVs_FinalDF_l_replaceNA_reordered$lfcres_df_SA_Bac)
+breaks_SA_Bac <- unique(c(
+  seq(min_value_SA_Bac, -1, length.out = 10), 
+  seq(-1, 1, length.out = 30), # More breaks in this range for sensitivity
+  seq(1, max_value_SA_Bac, length.out = 10)
+))
+
+SA_Bac_GoldenASVs_August2025 <- pheatmap(lfcres_GoldenASVs_FinalDF_l_replaceNA_reordered$lfcres_df_SA_Bac, 
+                           color = colorRampPalette(c("darkblue", "blue", "white", "red", "darkred"))(length(breaks_SA_Bac) - 1), 
+                           breaks = breaks_SA_Bac,
+                           cluster_rows = T,
+                           cluster_cols = F, 
+                           show_rownames = F, 
+                           show_colnames = T,
+                           annotation_row = taxonomy_4_l$ps_SA_Bac,
+                           annotation_legend = F,
+                           annotation_colors = Bacterial_phyla,
+                           scale = "none",
+                           #annotation_col = y,
+                           #main = "Log2Fold Changes_GoldenASVs", 
+                           silent = T,
+                           na_col = "black",
+                           gaps_col = c(9,10,11,19,20),
+                           fontsize = 20)
+
+
+#Homogenize the colors of the bacterial and fungal phyla
+Fungal_phyla = list(
+    Phylum = c(p__Ascomycota = "#FDB462",
+               p__Basidiomycota = "#DECBE4",
+               p__Chytridiomycota = "#FDDAEC",
+               p__Mortierellomycota = "#FF7F00",
+               p__Olpidiomycota = "#E78AC3",
+               p__Rozellomycota = "#E6F5C9"))
+
+#MeJA_Fun
+MeJA_Fun_GoldenASVs_August2025 <- pheatmap(lfcres_GoldenASVs_FinalDF_l_replaceNA_reordered$lfcres_df_MeJA_Fun, 
+                           color = colorRampPalette(c("blue","white","red"))(50),
+                           cluster_rows = T,
+                           cluster_cols = F, 
+                           show_rownames = F, 
+                           show_colnames = T,
+                           annotation_row = taxonomy_4_l$ps_MeJA_Fun,
+                           annotation_legend = F,
+                           annotation_colors = Fungal_phyla,
+                           scale = "none",
+                           #annotation_col = y,
+                           #main = "Log2Fold Changes_GoldenASVs", 
+                           silent = T,
+                           na_col = "black",
+                           gaps_col = c(9,10,11,19,20),
+                           fontsize = 20)
+
+#SA_Fun
+SA_Fun_GoldenASVs_August2025 <- pheatmap(lfcres_GoldenASVs_FinalDF_l_replaceNA_reordered$lfcres_df_SA_Fun, 
+                           color = colorRampPalette(c("blue","white","red"))(50), 
+                           cluster_rows = T,
+                           cluster_cols = F, 
+                           show_rownames = F, 
+                           show_colnames = T,
+                           annotation_row = taxonomy_4_l$ps_SA_Fun,
+                           annotation_legend = F,
+                           annotation_colors = Fungal_phyla,
+                           scale = "column",
+                           #annotation_col = y,
+                           #main = "Log2Fold Changes_GoldenASVs", 
+                           silent = T,
+                           na_col = "black",
+                           gaps_col = c(9,10,11,19,20),
+                           fontsize = 20)
+
+SA_Fun_GoldenASVs_August2025 <- pheatmap(lfcres_GoldenASVs_FinalDF_l_replaceNA_reordered$lfcres_df_SA_Fun, 
+                           color = colorRampPalette(c("blue","white","red"))(50),
+                           cluster_rows = T,
+                           cluster_cols = F, 
+                           show_rownames = F, 
+                           show_colnames = T,
+                           annotation_row = taxonomy_4_l$ps_SA_Fun,
+                           annotation_legend = F,
+                           annotation_colors = Fungal_phyla,
+                           scale = "none",
+                           #annotation_col = y,
+                           #main = "Log2Fold Changes_GoldenASVs", 
+                           silent = T,
+                           na_col = "black",
+                           gaps_col = c(9,10,11,19,20),
+                           fontsize = 20)
+
+#List
+GoldenASVs_heatmap_August2025 <- list(MeJA_Bac = MeJA_Bac_GoldenASVs_August2025, 
+                                    SA_Bac = SA_Bac_GoldenASVs_August2025,
+                                    MeJA_Fun = MeJA_Fun_GoldenASVs_August2025,
+                                    SA_Fun = SA_Fun_GoldenASVs_August2025)
+
+#convert to 'grob' to be able to export it
+heatgrob_GoldenASVs <- lapply(GoldenASVs_heatmap_August2025, function(x){
+ new <- as.grob(x)
+ return(new)
+ })
+
+arranged_heatgrob_August2025 <- ggarrange(plotlist = heatgrob_GoldenASVs, heights = c(2,1), labels = c("A", "B", "C", "D"))
+```
+
+#Check Heatmap
+```{r}
+arranged_heatgrob_August2025
+```
+
+#Export heatmaps
+```{r}
+ggexport(arranged_heatgrob_August2025, filename = "./07_consolidate_all_analysis/Results/Heatmaps_Responsive_ASVs/arranged_heatgrob_August2025.pdf",
+ ncol = 1, nrow = 1, height=24, width = 18)
+```
